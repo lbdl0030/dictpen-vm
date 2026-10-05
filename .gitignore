@@ -1,0 +1,37 @@
+# ===== 不进版本库的东西 =====
+# 运行期产物：每次开机会变（状态盘、日志、截屏、pid、vmgui 输出…）
+vm/
+
+# 外部依赖：用 scripts/bootstrap.py 或按 README《重建环境》自行获取
+tools/msys2/
+tools/pkgs/
+tools/db/
+tools/*.db
+tools/zstd/
+tools/kernel-root/
+tools/kernel-root-gui/
+tools/busybox-root/
+tools/arm64-rootfs/
+tools/platform-tools/
+
+# 本机生成、不该外传的：SSH 私钥、自签证书
+tools/ssh/
+vm/mitm/*.pem
+
+# 固件镜像（版权归网易有道，需自行下载；见 README《分发与重建》）
+# 它们放在固件包里：packs/<名字>/images/
+downloads/*.img
+downloads/*.deb
+downloads/arm64/
+packs/*/images/
+# 整包快照（几百 MB ~ 1.6 GB，属于分发产物，不进版本库）
+packs/*.zip
+dist/*.zip
+
+# 构建产物
+images/initramfs.cpio.gz
+dist/
+
+# Python
+__pycache__/
+*.pyc

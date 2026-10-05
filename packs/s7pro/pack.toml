@@ -1,0 +1,73 @@
+# 固件包：s7pro —— 第二台异构机器（Cvitek CV1826 族，rootfs 只读 erofs）。
+#
+# 现状（2026-10-05）：**可跑** —— 引导、桌面 UI 上屏（1020x240 四卡片）、触摸、
+# SSH/串口、假电量、持久化全部就绪。取证与逐条原因见本包 README.md。
+#
+# 与 a6pro/s6pro 的关键差异（对策都在 [adapt] 与 fixup.sh 里）：
+#   * runtime 用 cv18xx-linux-erofs（rootfs 是 erofs；s6pro 是 ext4）；
+#   * 板型 Y08_CV1813 由 [adapt.replace] 的 get_pcba_version.sh 报告；
+#   * OCR 栈（libyocr/libYoudaoStitch）需要 CVITEK TPU，VM 没有 —— 用两份
+#     桩化库替换，jsapi 加载链才不会断（断掉的表现是全黑 + 退回「验证引导」）；
+#   * app 走 tslib（等 BTN_TOUCH），virtio-tablet 只发 BTN_LEFT —— 开框架的
+#     touchbridge（uinput 桥）+ 本包 perl-tree；
+#   * vendor dhcpcd 在 VM 内核上 SIGSYS 崩、eth0 不 UP —— fixup 装 S00net-up
+#     用 busybox udhcpc 补位，否则 ssh/adb 全部悬空；
+#   * runCapFrame 的启动点在 S01systeminit 且无 & 结尾 —— fixup 按 S* 通配静默，
+#     否则 45 分钟写满 4GB 状态盘（实测）。
+
+name    = "s7pro"
+note    = "S7pro / Y08_CV1813（Cvitek CV1826）—— erofs rootfs，UI/触摸已验证"
+version = ""
+
+[platform]
+soc     = "cv1826"
+runtime = "cv18xx-linux-erofs"      # CV18xx 同族里 rootfs 为只读 erofs 的 backend
+kernel  = ""
+initrd  = ""
+
+[image]
+rootfs = "images/S7-1-pro-ro-system.img"
+boot   = "images/S7-1-pro-ro-boot.img"
+
+# 逻辑/虚拟屏 = 1020x240（横屏，与 UI 版式一致）。厂商 cfg.json 是 240/1020 +
+# direction=270（面板竖扫 + 显示引擎旋转），cfg_overlay 把 width/height/direction
+# 一起归一化成「1020x240 + direction=0」——理由与三条实测约束见 s6pro 包（同族同款
+# app 行为）：app 走 fbdev，启动时按 cfg 的尺寸 FBIOPUT_VSCREENINFO，尺寸对不上
+# 就直接退出。实测 vinfo 协商成功：`vinfo xres=1020 yres=240 bits_per_pixel=32`。
+[display]
+xres = 1020
+yres = 240
+rotation = 270
+
+[adapt]
+battery     = true                  # hal-battery 读 /sys/class/power_supply（框架假电量）
+license     = true                  # 开机写开发凭证
+ap          = false                 # 热点先不开（视觉验证用不到）
+touchbridge = "patches/touchbridge.pl"  # uinput 触摸桥（tslib 等 BTN_TOUCH；桥的
+                                        # 面板尺寸读 cfg.json=1020x240，不用改脚本）
+hooks       = ["patches/fixup.sh"]  # 见该脚本：诊断服务静默、applog 上限、网络、
+                                    # 串口 shell、触摸节点别名、perl、arm64 工具
+cfg_overlay = "patches/cfg.json.overrides"
+extra       = ["patches/perl-tree",         # fixup 素材：Debian armhf perl（桥运行时）
+               "patches/arm64-tree"]        # fixup 素材：arm64 strace + dropbear
+
+[adapt.replace]
+# 板型：固件原版读 /proc/device-tree/model，VM 里匹配不到任何分支
+"patches/get_pcba_version.sh" = "/usr/bin/get_pcba_version"
+# 应用启动脚本：删"每次清日志"与"崩溃 5 次 reboot"（其余与原版逐字一致）
+"patches/runDictPen.sh"       = "/usr/bin/runDictPen"
+# OCR 栈桩化（fixup.sh 第 3 节有完整原因链）：真 libyocr 的 init 链要 CVITEK TPU
+# （/dev/ion、/dev/cvi-tpu0），VM 没有；直接藏会让 dlopen("libyocr.so") 失败 →
+# global/verify jsapi 断 → 全黑。桩 = 真库全导出改写（init/open/create 返回 -1、
+# 其余 0，构造器中和），DT_NEEDED / 运行期 dlopen / 深层符号全部自然解析。
+"patches/libyocr.so"          = "/oem/YoudaoDictPen/output/libs/libyocr.so"
+"patches/libYoudaoStitch.so"  = "/oem/YoudaoDictPen/output/libs/libYoudaoStitch.so"
+
+[checks]
+"images/S7-1-pro-ro-system.img" = { md5 = "234e5d5f6a0be3bd36f8b75f44f9419a" }
+"images/S7-1-pro-ro-boot.img"   = { md5 = "cd005817e4e6271e9ec74a605f01f06e" }
+
+[state]
+# 状态盘大小（MiB）：首启要装 preset 应用包，512M 装不下会表现为应用反复重启。
+# 改大只在创建状态盘时生效（--fresh 或删盘）。
+size_mb = 4096

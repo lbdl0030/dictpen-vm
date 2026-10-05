@@ -1,0 +1,48 @@
+name    = "a7pro"
+note    = "A7pro / RV1106 / YoudaoOS（a6pro 同族）"
+
+[platform]
+soc     = "rv1106"
+runtime = "rv1106-linux-erofs"
+kernel  = ""
+initrd  = ""
+
+[image]
+rootfs = "images/a7-1-pro-ro-rootfs_b.img"
+boot   = "images/a7-1-pro-ro-boot_b.img"
+
+[display]
+xres     = 640
+yres     = 172
+rotation = 270
+bpp      = 32
+
+[adapt]                                        # a6pro 同族的经验适配
+touchbridge = "patches/touchbridge.pl"         # 鼠标 -> 触摸桥（uinput，axs_ts）
+cfg_overlay = "patches/cfg.json.overrides"     # direction=0 + bpp=32 + tp
+battery     = true                             # 伪造健康电量（VM 没有 PMIC）
+license     = true                             # 开机写开发凭证（框架自带脚本）
+ap          = true                             # wlan1 虚拟热点
+
+[adapt.replace]                                # 覆盖 guest 文件
+"patches/runDictPen.sh" = "/usr/bin/runDictPen"   # 去掉崩溃计数 reboot（VM 无 A/B 升级）
+"patches/libfalcon.so"  = "/usr/lib/libfalcon.so"  # fourcc AR24/RG16 -> XR24（bochs 只有 XR24）
+# 开发用绕过：让 yd_hal_verify_license 恒真。不做的话，JS 侧 global.verifyLicense
+# 会在开机约 5 分钟后重新校验失败（redo verify），把前台切到「验证引导」，
+# 笔就变成"提示激活、用不了"。只改一个 32 位字（文件偏移 0x8f84：
+# mov r0, r3 -> mov r0, #1）；生成脚本 vm/_a7pro-verify/patch-license-bypass.py
+# --patch hal。固件版本一变必须重新生成。
+"patches/libydhal_devices.so" = "/usr/lib/libydhal_devices.so"
+
+[checks]
+"images/a7-1-pro-ro-rootfs_b.img" = { md5 = "0d93a0d6d6b06111e0f03c4818a46762" }
+"images/a7-1-pro-ro-boot_b.img"   = { md5 = "bed7f5701a07188b32b852bc36c0bd4f" }
+
+# 状态盘大小（MiB）。overlay 的 upper 层就住在这块盘上：盘一满，overlay 只能退化成
+# 只读（overlayfs: failed to create directory /state/work/work (errno: 28)），
+# /mnt 上所有写入——装 S00 钩子、写 cfg.json、放补丁——全部报 Read-only file system，
+# 笔的 UI 起不来。实测 a7pro 的 /userdata 约 190 MiB，另外 vendor 会写
+# userdisk/swap/swap.file 257 MiB（VM 有 2G 内存用不到，/init 会清掉）和一份重复的
+# userdisk/secondary 85 MiB。给 1 GiB，留一倍余量。
+[state]
+size_mb = 1024

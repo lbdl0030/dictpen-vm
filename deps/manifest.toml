@@ -1,0 +1,107 @@
+# 依赖清单 —— `python scripts/bootstrap.py` 按这份清单"检查 → 获取 → 校验"。
+#
+# 为什么有这份文件：项目本身只带代码（几十 KB），固件/工具链都是外部大文件，
+# 不能进版本库（体积 + 版权）。这份清单把"缺什么、去哪拿、怎么校验"写死一处，
+# 让新环境可以一条命令重建，而不是照文档手工点。
+#
+# MD5 一律采用**上游公布的值**（能对得上就不怀疑），只用于"下载完整"，不是安全边界。
+version = 1
+
+# ---------------------------------------------------------------- 宿主工具链
+[[item]]
+id = "zstd"
+what = "zstd.exe（解 MSYS2 的 .zst 包用）"
+check = "tools/zstd/zstd-v1.5.7-win64/zstd.exe"
+how = "file"
+url = "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-v1.5.7-win64.zip"
+into = "tools/zstd"
+optional = true    # 只有走 MSYS2 装 QEMU 才需要
+
+[[item]]
+id = "qemu"
+what = "便携 QEMU 11.1 / MSYS2 ucrt64（含 GTK、slirp、virtio 等）"
+check = "tools/msys2/ucrt64/bin/qemu-system-aarch64.exe"
+how = "msys2"
+mirror = "https://mirrors.tuna.tsinghua.edu.cn/msys2/mingw/ucrt64"
+packages = ["mingw-w64-ucrt-x86_64-qemu"]   # 依赖由 msys2-fetch.py 递归补齐
+note = "也可手动把官方 QEMU 解压到 tools/msys2/ucrt64/"
+
+# ---------------------------------------------------------------- guest 侧内核与工具
+[[item]]
+id = "busybox"
+what = "Debian arm64 busybox-static（initramfs 的 shell）"
+check = "tools/busybox-root/usr/bin/busybox"
+how = "deb"
+debs = ["downloads/busybox-static.deb"]
+into = "tools/busybox-root"
+where = "https://mirrors.tuna.tsinghua.edu.cn/debian/pool/main/b/busybox/（找 busybox-static_*_arm64.deb）"
+
+[[item]]
+id = "kernel"
+what = "Debian linux-image 6.1.0-50-arm64（含 DRM/bochs/virtio/ext4 模块 + vmlinuz）"
+check = "tools/kernel-root-gui/boot/vmlinuz-6.1.0-50-arm64"
+how = "deb"
+debs = ["downloads/kernel.deb", "downloads/kernel-generic.deb"]
+into = "tools/kernel-root-gui"
+where = "https://mirrors.tuna.tsinghua.edu.cn/debian/pool/main/l/linux/（找 6.1.0-50 的 arm64 linux-image 包）"
+
+[[item]]
+id = "arm64-rootfs"
+what = "虚拟热点用的 Debian arm64 包（hostapd + iptables + 依赖库）"
+check = "tools/arm64-rootfs/usr"
+how = "deb-arm64"
+packages = ["hostapd", "libnl-3-200", "libnl-genl-3-200", "libnl-route-3-200",
+            "libssl3", "libc6", "libcrypt1", "libgcc-s1", "iptables",
+            "libip4tc2", "libip6tc2", "libxtables12"]
+note = "缺了它只是没有虚拟热点，Wi-Fi 网卡照常"
+
+[[item]]
+id = "adb"
+what = "Android platform-tools（adb，可选：dpctl adb 用）"
+check = "tools/platform-tools/adb.exe"
+how = "manual"
+optional = true
+where = "https://developer.android.com/tools/releases/platform-tools（解压到 tools/platform-tools/）"
+note = "也可以让 adb 在 PATH 上，dpctl 会自动找"
+
+# ---------------------------------------------------------------- 本机生成的私密文件
+[[item]]
+id = "ssh-key"
+what = "VM 的 SSH 私钥（本机生成，不入库、不分享）"
+check = "tools/ssh/id_devvm"
+how = "ssh-key"
+
+[[item]]
+id = "mitm-cert"
+what = "mitm-verify.py 用的自签证书（本机生成）"
+check = "vm/mitm/cert.pem"
+how = "cert"
+optional = true
+
+# ---------------------------------------------------------------- 笔的固件（版权属有道）
+# 固件是**一个包**（packs/<名字>/）：镜像、面板参数、HAL 补丁都在一起。框架本身
+# 不含固件，`dpctl packs` 看有哪些包、`dpctl up --pack <名字>` 启动。
+[[item]]
+id = "firmware"
+what = "笔的固件包 a6pro：rootfs + boot（A6pro / Pear_RV1106 / YoudaoOS 4.7.4）"
+check = "packs/a6pro/images/a6-2-pro-ro-rootfs.img"
+how = "firmware"
+into = "packs/a6pro/images"                   # 下载的文件放这（= 包内 images/）
+release = "A6pro"
+also = ["packs/a6pro/images/a6-2-pro-ro-boot_b.img"]   # rootfs 之外必需的那一半
+page = "https://github.com/lbdl0030/dictpen-rootfs/releases/tag/A6pro"
+note = "版权归网易有道，仅供个人研究；大文件走作者给的网盘（见 releases.json 里该 release 的说明）"
+# 上游文件名 -> 本地文件名, MD5（取自上游 release 说明，实测一致）
+files = [
+  { upstream = "A6pro_rootfs.img", local = "a6-2-pro-ro-rootfs.img",md5 = "0dfe781b76955f5dfe3d8aedde585c36", size = 1342177280 },
+  { upstream = "A6pro_boot.img", local = "a6-2-pro-ro-boot_b.img",md5 = "6cfa8d8ac37a057999b69a2c5098e201", size = 33554432 },
+]
+
+# ---------------------------------------------------------------- 构建产物
+[[item]]
+id = "initramfs"
+what = "自制 initramfs（busybox + 内核模块 + 引导逻辑）"
+check = "images/initramfs.cpio.gz"
+how = "initramfs"
+needs = ["busybox", "kernel", "arm64-rootfs"]
+# 不校验哈希：它是本仓库的构建产物，改了 scripts/initramfs-init.sh 就会变

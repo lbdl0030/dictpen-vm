@@ -1,0 +1,61 @@
+name    = "x5pro"
+note    = "X5pro / Cherry V1 CV1826 / YoudaoOS —— UI/触摸已验证（2026-10-05）"
+
+[platform]
+soc     = "cv1826"
+runtime = "cv18xx-linux-ext4"
+kernel  = ""                                   # 用框架通用 arm64 内核（CONFIG_COMPAT 跑 armhf 用户态）
+initrd  = ""                                   # 用框架通用 initramfs
+
+[image]
+rootfs = "images/x5-1-pro-ro-rootfs_b.img"     # ext4，只读根
+boot   = "images/x5-1-pro-ro-boot_b.img"       # FIT 镜像，仅作参数参考
+
+# 逻辑/虚拟屏 = 800x254（横屏，与 UI 版式一致）。厂商 cfg.json 是 254/800 +
+# direction=270（面板竖扫 + 显示引擎旋转），cfg_overlay 归一化成「800x254 +
+# direction=0」—— 与 s6pro 的 640x260 同一配方（s6pro README §5）。竖屏给的时候
+# UI 以 800 宽版式斜切进 254 宽缓冲（vm/x5-first.png），改横屏后完整正立
+# （vm/x5-home.png）。
+[display]
+xres     = 800
+yres     = 254
+rotation = 270
+bpp      = 32
+
+[adapt]
+hooks       = ["patches/fixup.sh"]             # 诊断服务静默、applog 上限、perl、
+                                               # arm64 dropbear、串口 shell（见该脚本）
+touchbridge = "patches/touchbridge.pl"         # uinput 触摸桥（面板尺寸读 cfg.json
+                                               # =800x254，脚本不用改）
+cfg_overlay = "patches/cfg.json.overrides"     # width/height 转置 + direction=0 + tp
+battery     = true                             # 伪造健康电量（VM 没有 PMIC）
+license     = true                             # 开机写开发凭证（框架自带脚本）
+ap          = true                             # wlan1 虚拟热点（hostapd 为 aarch64，兼容内核可跑）
+extra       = ["patches/perl-tree",            # fixup 素材：Debian armhf perl（桥运行时）
+               "patches/arm64-tree"]           # fixup 素材：arm64 strace + dropbear
+                                               # （rootfs 无 dropbear；dpctl sh/put/get 走 SSH）
+# 触摸为什么必须走桥：这台 app 首选 cfg tp 的 evdev 触摸屏（真机是 I2C 触摸），
+# 桥不在时才退化到 /dev/input/mouse0（mousedev）。mousedev 的 ABS 跳变换算不可靠，
+# 实测点击落在 app 内部光标的旧位置上（vm/x5-tap2.png 无反应）；桥把 tablet 重发布
+# 成 BTN_TOUCH+ABS 的真触摸屏后，tap 位置正确。
+
+[adapt.replace]                                # 覆盖 guest 文件
+"patches/get_pcba_version.sh"  = "/usr/bin/get_pcba_version"
+"patches/noop_update_engine.sh" = "/usr/bin/update_engine"
+"patches/runDictPen.sh"        = "/usr/bin/runDictPen"
+# OCR 栈桩化（s7pro README §4 同款方案）：真 libyocr 的初始化链要 CVITEK TPU
+# （cvi_device_mem.cpp:528 assert(0)，实测 miniapp Aborted 重启循环）；这台还有
+# 运行期 dlopen("libyocr.so") 与 libYoudaoStitch 深层符号两条路，所以用"在但不
+# 工作"的桩库整体替换（init/open/create 类返回 -1，其余 0，构造器中和），
+# DT_NEEDED / dlopen / 深层符号全部自然解析，presetpkgs 无需改动。
+"patches/libyocr.so"           = "/oem/YoudaoDictPen/output/libs/libyocr.so"
+"patches/libYoudaoStitch.so"   = "/oem/YoudaoDictPen/output/libs/libYoudaoStitch.so"
+
+[checks]
+"images/x5-1-pro-ro-rootfs_b.img" = { md5 = "d4b8420fff99e8d9daa00d8956c6036b" }
+"images/x5-1-pro-ro-boot_b.img"   = { md5 = "90786ebdfb327d41094fb252e506d575" }
+
+[state]
+# 状态盘（MiB）：当前盘是 512M 早期建的（73% 占用）；加大只在创建时生效
+# （up --fresh 或删 vm/state-x5pro.img）。
+size_mb = 2048

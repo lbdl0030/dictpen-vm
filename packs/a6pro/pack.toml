@@ -1,0 +1,45 @@
+# 固件包：a6pro —— 一台机器的全部"会变的东西"都在这一个目录里。
+#
+# 框架（dpctl / vmgui / initramfs）不认识本文件里的任何数值：镜像、面板尺寸、
+# HAL 补丁、机型 profile 名都由包声明，启动时 `dpctl up --pack a6pro` 选它。
+# 换机型 = 复制这个目录改路径，或 `dpctl pack import <文件>`。
+
+name    = "a6pro"
+note    = "A6pro / Pear_RV1106 / YoudaoOS 4.7.4"
+version = "4.7.4"
+
+[platform]                          # 决定框架用哪个 runtime（boot backend）
+soc     = "rv1106"
+runtime = "rv1106-linux-erofs"
+# 留空 = 用框架自带的通用内核 / 通用 initramfs（本包不需要自带）
+kernel  = ""
+initrd  = ""
+
+[image]                             # 路径相对本包目录
+rootfs = "images/a6-2-pro-ro-rootfs.img"    # 只读 erofs，挂给 guest
+boot   = "images/a6-2-pro-ro-boot_b.img"    # DTB + 面板/DRM 参数（参数参考）
+
+[display]                           # 虚拟屏参数（框架不猜，EDID 也由它生成）
+xres     = 560
+yres     = 170
+rotation = 0
+bpp      = 32
+
+[adapt]                             # 平台适配：声明了才生效
+logo        = "patches/logo.fb.gz"            # 开机 logo（写 /dev/fb0）
+touchbridge = "patches/touchbridge.pl"        # 鼠标 -> 触摸桥（uinput）
+cfg_overlay = "patches/cfg.json.overrides"    # 只覆盖列出的 cfg.json 键
+battery     = true                            # 伪造健康电量（VM 没有 PMIC）
+license     = true                            # 开机写开发凭证，跳过激活页
+ap          = true                            # wlan1 上起虚拟热点 Youdao-VM
+
+[adapt.replace]                     # 开机把包里的文件覆盖到 guest 根的指定位置
+# 键 = 包内路径，值 = guest 绝对路径。框架只按表搬运，不关心文件是什么。
+"patches/libfalcon.so" = "/usr/lib/libfalcon.so"
+
+[client]                            # 交给 vmgui 的机型 profile（vmgui/profiles/<名>.toml）
+profile = "pear-a6pro"
+
+[checks]                            # 可选：启动前校验（MD5 取自上游 release）
+"images/a6-2-pro-ro-rootfs.img" = { md5 = "0dfe781b76955f5dfe3d8aedde585c36" }
+"images/a6-2-pro-ro-boot_b.img" = { md5 = "6cfa8d8ac37a057999b69a2c5098e201" }

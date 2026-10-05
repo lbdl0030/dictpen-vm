@@ -1,0 +1,33 @@
+Dropbear for Debian
+-------------------
+
+This package will attempt to setup the Dropbear SSH server to listen on
+port 22.
+
+This package suggests you install the "openssh-client" package, which
+provides the ssh(1) client program, as well as the `/usr/bin/scp` binary
+which is required in order to retrieve files via SCP from a server
+running Dropbear.
+
+
+Replacing OpenSSH "sshd" with Dropbear
+--------------------------------------
+
+You will still want to have the "openssh-client" package installed, as
+it provides the ssh(1) and scp(1) binaries. When you install this package,
+it checks for existing OpenSSH host keys and if found, converts them to
+Dropbear's own format.
+
+If this appears to have worked, you should be able to change over by
+following these steps:
+
+1. Stop the OpenSSH server
+   % systemctl stop ssh
+2. Prevent the OpenSSH server from starting in the future
+   % touch /etc/ssh/sshd_not_to_be_run
+3. Optionally edit /etc/default/dropbear with custom options.
+4. Restart the Dropbear server.
+   % systemctl restart ssh
+
+See the Dropbear homepage for more information:
+  https://matt.ucc.asn.au/dropbear/dropbear.html

@@ -1,0 +1,20 @@
+# 只覆盖列出的键（key=value，每行一个）；未列出的键保持固件原样。
+#
+# X5pro（Cherry CV1826）的改动：
+#   width/height  厂商 cfg.json 是 254/800（面板竖扫方向）+ direction=270；这台 app
+#                 的 UI 版式是**横屏 800x254**，启动时拿 cfg 的尺寸去
+#                 FBIOPUT_VSCREENINFO（尺寸对不上就失败退出）。所以把宽高按逻辑
+#                 方向写死成 800x254，与包声明的虚拟屏一致，app 1:1 画满
+#                 framebuffer —— 与 s6pro 的 640x260 同一配方（s6pro README §5）。
+#                 实测：竖屏 254x800 时 UI 以 800 宽版式斜切进 254 宽缓冲
+#                 （vm/x5-first.png），改 800x254 后完整正立（vm/x5-home.png）。
+#   direction 0  真机面板 direction=270（cvifb start_x=113 width=254，显示引擎旋转
+#                扫描）；VM 的 bochs-display 没有平面旋转，UI 必须 1:1 写入
+#                framebuffer，否则画面斜切。
+#   tp           真机触摸是 platform-4020000.i2c-event（I2C 触摸芯片）；这台 app
+#                实际读 /dev/input/mouse0（mousedev，不走 tslib/evdev），tp 只是
+#                兜底路径 —— 指到 by-path/axs_ts（框架 touchbridge 桥或裸 tablet）。
+width=800
+height=254
+direction=0
+tp=/dev/input/by-path/axs_ts

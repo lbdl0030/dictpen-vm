@@ -1,0 +1,6 @@
+# a7pro：与 a6pro 同族。direction=0（VM 无平面旋转，1:1 写入）；
+# bpp=32（guest 平面只吃 32 位格式）；tp 由触摸桥提供。
+# width/height 保持固件原值 640x172，与虚拟屏一致，无需覆盖。
+direction=0
+bpp=32
+tp=/dev/input/by-path/axs_ts

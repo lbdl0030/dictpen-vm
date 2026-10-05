@@ -1,0 +1,26 @@
+# 只覆盖列出的键（key=value，每行一个）；未列出的键保持固件原样。
+#
+# S6pro（CoCo-1826，Plum 面板分支）的改动：
+#   width/height   厂商是 260/640（面板竖扫方向），但这台 app 的 **UI 版式是横屏
+#                  640x260**，而且它启动时会拿 cfg.json 的屏幕尺寸去
+#                  `FBIOPUT_VSCREENINFO`（尺寸对不上就失败退出、guardian 反复重启，
+#                  屏幕全黑）。所以把宽高按逻辑方向写死成 640x260，与包声明的
+#                  虚拟屏一致，app 就 1:1 画满整个 framebuffer。
+#   direction 0    真机 direction=270（cvifb start_x=110 width=260，显示引擎旋转
+#                  扫描）；VM 的 bochs-display 没有平面旋转，UI 必须 1:1 写入
+#                  framebuffer，否则 falcon 会按"目标被旋转过"算行跨度，画面斜切。
+#                  实测：保持 270 会把 640 宽的逻辑版式写进 260 宽的缓冲并被裁掉。
+#   tp_direction 0 真机触摸坐标按 270 旋转进 UI 坐标系；VM 的虚拟触摸直接报
+#                  UI 像素，不需要再转。
+#   tp_xoffset/tp_yoffset 0
+#                  真机触摸条与面板之间有 110 像素偏移；虚拟触摸没有偏移。
+#   tp             真机触摸是 platform-4020000.i2c-event（hynitron I2C 触摸芯片）；
+#                  VM 里 fixup 钩子把 QEMU Virtio Tablet 的 event 节点链到
+#                  /dev/input/by-path/vm-tp（触摸桥就位后指向桥创建的设备）。
+width=640
+height=260
+direction=0
+tp_direction=0
+tp_xoffset=0
+tp_yoffset=0
+tp=/dev/input/by-path/axs_ts

@@ -1,0 +1,16 @@
+# 只覆盖列出的键（key=value，每行一个），不再整文件 sed。
+#
+# guest 侧通用 init 按"值以数字开头 -> 按数字替换；以 / 开头 -> 按字符串替换"，
+# 把 key 对应的 JSON 键改掉。没列出的键一律保持固件原样。
+#
+# 为什么要改：
+#   direction 0  pen 的面板是竖屏 270，falcon 会按"目标被旋转过"算行跨度写到
+#                framebuffer 上；VM 的显示设备没有平面旋转，必须 1:1 写，
+#                否则画面斜切。
+#   bpp 32       面板本来要 16bpp(RGB565)，guest 的平面只吃 32 位格式。
+#   tp           pen 本来开 axs_ts.ko 的触摸屏；VM 里那个设备由触摸桥提供。
+width=560
+height=170
+direction=0
+bpp=32
+tp=/dev/input/by-path/axs_ts

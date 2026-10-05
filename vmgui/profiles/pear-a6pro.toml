@@ -1,0 +1,16 @@
+# dictpen A6pro 笔屏（YoudaoOS）：560x170，触摸 UI。
+# 触摸反馈由画布内的标记提供，guest 要的是 BTN_TOUCH(330) 而不是鼠标左键。
+[display]
+mode = "fit"
+scale_algo = "nearest"          # guest 分辨率很小，平滑会在放大时糊掉
+rotation = 0
+initial_zoom = 2.0
+pointer_marker = true
+
+[display.crop]
+enabled = false
+
+[input]
+pointer_mode = "auto"           # virtio-tablet 宣告了绝对轴 -> 走绝对模式
+touch_button = 330
+send_click_with_touch = true

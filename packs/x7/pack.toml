@@ -1,0 +1,46 @@
+name    = "x7"
+note    = "X7 / YDPX7 / RV1106 / aarch64+glibc（实验性：只有 system_a 镜像，没有 boot）"
+
+[platform]
+soc     = "rv1106"
+runtime = "rv1106-linux-erofs"
+kernel  = ""
+initrd  = ""
+
+[image]
+# 只用 system_a 一份镜像（已放在包内 images/，路径相对包目录）。
+# runtime 从不读 boot，packlib 也只把 rootfs 当必需文件。
+rootfs = "images/x7-system_a.img"
+
+[display]
+# 取自镜像自带 /etc/miniapp/resources/cfg.json 的 screen.width/height。
+# 该文件同时写着 direction/tp_direction=270、xoffset=0、yoffset=107、tp_xoffset=113，
+# 虚拟屏是 1:1 无旋转，所以那些都在 cfg_overlay 里归零。
+xres     = 960
+yres     = 266
+rotation = 270
+bpp      = 32
+
+[adapt]
+touchbridge = "patches/touchbridge.pl"         # 鼠标 -> 触摸桥（uinput）
+cfg_overlay = "patches/cfg.json.overrides"     # 归零旋转/偏移 + 指向桥的节点
+battery     = true                             # 伪造健康电量（VM 没有 PMIC）
+license     = true                             # 开机写开发凭证（框架自带脚本）
+ap          = true                             # wlan1 虚拟热点
+
+[state]
+# 8 GiB。容量只在**创建状态盘时**生效：改完要 `up --pack x7 --fresh`（或先删
+# vm/state-x7.img），否则已有的盘不会自动扩（dpctl.py 只在创建时用 size_mb）。
+size_mb = 8192
+
+# 暂不写 [checks]：镜像 2.5 GiB，每次 dpctl packs 都会算一遍 MD5，很慢。
+# 确认能跑之后要固定，就补上（用 certutil -hashfile 算）。
+[adapt.replace]
+# x7 的 falcon 期望 plane 格式 AR24(ARGB8888)，bochs-drm 只给 XR24(XRGB8888)；
+# 只改一条指令（0x2ca218 低半字 0x5241->0x5258），见 vm/_x7-probe/patch-fourcc.py。
+"patches/libfalcon.so" = "/usr/lib/libfalcon.so"
+# 厂商 logo 是给真机 480x960@32bpp 面板的裸帧数据（1843200 字节），falcon 启动时
+# 把整个文件 memcpy 进 framebuffer（960x266@32bpp，1021440 字节）直接越界写 -> SIGSEGV。
+# 这两份是按 VM 面板重制的裸帧（有道 logo 居中摆正），大小恰好 = pitch*height。
+"patches/logo-startup.bin" = "/etc/miniapp/resources/youdao_startup_logo.bmp"
+"patches/logo-ota.bin" = "/etc/miniapp/resources/youdao_ota_logo.bmp"

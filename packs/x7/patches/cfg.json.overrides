@@ -1,0 +1,12 @@
+# x7pro（YDPX7）：镜像自带 cfg.json 是 960x266 + direction 270 + yoffset 107 +
+# tp_direction 270 + tp_xoffset 113。虚拟屏是 1:1、不旋转，所以旋转和偏移全部归零，
+# 触摸指向桥创建的节点（原值是 /dev/input/by-path/hyn_ts，那是真机的触摸屏）。
+# 【未经真机/实测校准，第一次开机后要按截图核对】
+direction=0
+xoffset=0
+yoffset=0
+tp_direction=0
+tp_xoffset=0
+tp_yoffset=0
+bpp=32
+tp=/dev/input/by-path/axs_ts

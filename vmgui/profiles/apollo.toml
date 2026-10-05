@@ -1,0 +1,15 @@
+# 示例机型：另一套固件 / 另一块屏（bochs-display,xres=960,yres=266）。
+# 这里不写任何分辨率，窗口大小与缩放完全由取到的帧尺寸决定 -> 零改码自适应。
+[display]
+mode = "fit"
+scale_algo = "nearest"
+rotation = 0
+initial_zoom = 1.0
+
+[display.crop]
+enabled = false
+
+[input]
+pointer_mode = "auto"
+touch_button = 330
+send_click_with_touch = true

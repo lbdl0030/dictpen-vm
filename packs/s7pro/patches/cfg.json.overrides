@@ -1,0 +1,29 @@
+# 只覆盖列出的键（key=value，每行一个）；未列出的键保持固件原样。
+#
+# s7pro（Y08 / CV1813，Plum 同族的另一种面板）：
+#   width/height  厂商 cfg.json 是 240/1020（面板扫描方向，竖屏）+ direction=270；
+#                 这台 app 的逻辑版式是它的**转置**（横屏 1020x240），而且启动时会
+#                 拿 cfg 的尺寸去 FBIOPUT_VSCREENINFO（尺寸对不上就失败退出、
+#                 guardian 反复重启，屏幕全黑 —— s6pro 上实测过一模一样的现象）。
+#                 所以把宽高归一化成逻辑方向的 1020x240，与包声明的虚拟屏一致，
+#                 app 就 1:1 画满整个 framebuffer。
+#   direction 0   真机方向由显示引擎旋转完成（direction=270）；VM 的 bochs-display
+#                 没有平面旋转，UI 必须 1:1 写 framebuffer，否则 falcon 按"目标被
+#                 旋转过"算行跨度，画面斜切/被裁。
+#   tp_direction 0 真机触摸坐标按 270 转进 UI 坐标系；虚拟触摸直接报 UI 像素。
+#   tp_xoffset/tp_yoffset 0  真机触摸条有偏移，虚拟触摸没有。
+#   tp            真机是 I2C 触摸 platform-4010000.i2c-event；VM 里由 fixup 钩子的
+#                 S00tp-link 把 QEMU Virtio Tablet 的 event 节点链到那个名字。
+#   dbuffer false 关掉 app 的双缓冲翻页。实测：app 启动时想把 yres_virtual 扩成
+#                 2*yres=480 并靠 FBIOPAN_DISPLAY 翻页，而 bochs-display 不接受
+#                 FBIOPUT_VSCREENINFO（尺寸/虚拟尺寸不能改）——结果它翻到的那一页
+#                 落在扫描区之外：`dd if=/dev/fb0` 统计有 244800 个非零字节（app
+#                 确实在画），但 QEMU 截屏全黑。关掉后 app 直接画到可见缓冲。
+width=1020
+height=240
+direction=0
+dbuffer=false
+tp_direction=0
+tp_xoffset=0
+tp_yoffset=0
+tp=/dev/input/by-path/vm-tp

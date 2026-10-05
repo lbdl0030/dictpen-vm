@@ -1,0 +1,108 @@
+# 固件包：s6pro —— Cvitek CV1826 族的第二台机器（S6pro / CoCo-1826）。
+#
+# 与 a6pro 的关键差异（研究结论见 README）：
+#   * rootfs 是只读 ext4（非 erofs）→ runtime 用 cv18xx-linux-ext4；
+#   * 应用启动走 S50-app-launcher，板型由 /proc/device-tree/model 经
+#     get_pcba_version 决定 —— VM 里匹配不到任何分支，UI 栈不会启动，
+#     所以必须用 replace 换掉 get_pcba_version（报告 Plum_V0）；
+#   * 这台机器的 S50launcher 是 hal 服务启动器（wpas/bluetooth/wifi-mgr），
+#     应用不在里面 —— 框架会把它改名禁用（那是 a6pro 的语义），fixup 钩子
+#     负责改回来；
+#   * rootfs 无 perl / 无 dropbear：触摸桥和 SSH 访问都要另行解决（见 README）。
+
+name    = "s6pro"
+note    = "S6pro / CoCo-1826（Cvitek CV1826，Plum 面板分支）"
+version = ""
+
+[platform]                          # 决定框架用哪个 runtime（boot backend）
+soc     = "cv1826"
+runtime = "cv18xx-linux-ext4"       # rootfs 为只读 ext4；armhf 用户态跑在 arm64 兼容内核上
+kernel  = ""                        # 留空 = 用框架自带的通用内核
+initrd  = ""                        # 留空 = 用框架的通用 initramfs
+
+[image]                             # 路径相对本包目录
+rootfs = "images/S6-1-pro-ro-system_b.img"   # 只读 ext4，挂给 guest
+boot   = "images/S6-1-pro-ro-boot_b.img"     # FIT（内核 + 4 块板 DTB），仅作参数参考
+
+[display]                           # 虚拟屏参数（框架不猜，EDID 也由它生成）
+# 逻辑/虚拟屏 = 640x260（横屏，与 UI 版式一致）。厂商 cfg.json 里写的是
+# width=260 / height=640 / direction=270（面板竖扫 + 显示引擎旋转），
+# cfg_overlay 把 width/height/direction 一起归一化成「640x260 + direction=0」。
+#
+# 三条实测约束（缺一个都出不来画面，2026-10-04）：
+#   1) 这个 app 走 **fbdev**（/dev/fb0），启动时按 cfg.json 的 screen.width/height
+#      要一个 vinfo：虚拟屏与 cfg 尺寸不一致时 `FBIOPUT_VSCREENINFO` 失败，日志打
+#      `Error putting variable information with bits_per_pixel(32/16)` +
+#      `Screen size overstep.`，进程退出 -> guardian 反复重启 miniapp，屏幕全黑；
+#   2) 它的 **UI 版式是横屏 640x260**：把 260x640 的 fb 给它（cfg 也 260x640）时，
+#      falcon 以 direction=0 按 1:1 写入，结果是 640 宽的版式画进 260 宽的缓冲，
+#      右侧被裁、下方留白（就是"画面被转过去/对不上"的样子）；
+#   3) VM 的 bochs-display 没有平面旋转，所以必须让 fb 就是逻辑尺寸、direction=0，
+#      画面才能 1:1 上屏（与 a6pro/a7pro 同一套路）。
+xres     = 640
+yres     = 260
+rotation = 270
+bpp      = 32
+
+[adapt]                             # 平台适配：声明了才生效
+battery     = true                            # hal-battery 读 /sys/class/power_supply（同 a6pro）
+license     = true                            # 开机写开发凭证（app 是否买账见 README）
+ap          = true                            # wlan1 上起虚拟热点 Youdao-VM
+touchbridge = "patches/touchbridge.pl"         # 触摸桥（BTN_LEFT -> BTN_TOUCH，uinput "axs_ts"）
+cfg_overlay = "patches/cfg.json.overrides"    # 只覆盖列出的 cfg.json 键
+hooks       = ["patches/fixup.sh"]            # S50launcher 恢复 / 串口 shell / dropbear / tp 链接
+extra       = ["patches/dropbear-tree",       # fixup 素材：Debian arm64 dropbear（原样进 /patches/dropbear-tree）
+               "patches/perl-tree"]           # fixup 素材：Debian armhf perl-base（触摸桥运行时）
+
+[adapt.replace]                     # 开机把包里的文件覆盖到 guest 根的指定位置
+# 原版从 /proc/device-tree/model 读板型；VM 里是 QEMU 的 model，所有分支都不匹配，
+# S50-app-launcher 因此不拉 UI 栈。这里报告本机对应分支（证据见 README）。
+"patches/get_pcba_version.sh" = "/usr/bin/get_pcba_version"
+# 应用启动脚本：补 LD_LIBRARY_PATH 的 jsapi/messageknife 目录（黑屏根因，见
+# patches/runDictPen.sh 头注释），并去掉崩溃计数引发的硬重启。
+"patches/runDictPen.sh" = "/usr/bin/runDictPen"
+# OCR 栈适配（见 fixup.sh 的 libyocr 注释）：VM 没有 CVITEK TPU，libyocr 的
+# 初始化路径必然 assert(0) abort；而 libyocr 又被 jsapi 库的 DT_NEEDED 拉着，
+# 直接藏掉会让 global 等 jsapi 加载失败、UI 起不来。这两份补丁版把 DT_NEEDED
+# 里的 "libyocr.so" 原位改成同长度的 "libdl.so.2"（两者对 libyocr 均无直接
+# 符号引用，已核对 dynsym），配合 fixup 藏掉 libyocr：OCR 不可用，其余正常。
+"patches/libyddal_business.so" = "/oem/YoudaoDictPen/output/libs/libyddal_business.so"
+"patches/libjsapi_export.so" = "/etc/miniapp/jsapis/libjsapi_export.so"
+# libYoudaoStitch（OCR 门面，703 个导出）整体桩化：所有导出函数直接返回
+# （init/open/create 类返回 -1 = OCR 不可用，走 app 自带的容忍路径；其余返回 0）。
+# 不桩化它时，它的 yocr 符号靠 libyddal_business 的 DT_NEEDED 间接满足——那条路
+# 一断（libyocr 被藏）就 symbol lookup error 秒崩；桩化后 yocr/ncnn/TPU 栈整条
+# 不再被调用（模型加载、munmap_chunk 堆破坏都消失）。
+"patches/libYoudaoStitch.so" = "/oem/YoudaoDictPen/output/libs/libYoudaoStitch.so"
+# presetpkgs 里的 jsapi/business 库 DT_NEEDED 拉着 libyocr.so（无直接符号引用），
+# 应用安装 payload 时按这里的补丁版解包（libyocr.so -> libdl.so.2，同长度原位替换）。
+"patches/presetpkgs/8001650599023931.amr" = "/etc/miniapp/resources/presetpkgs/8001650599023931.amr"
+"patches/presetpkgs/8001654057944134.amr" = "/etc/miniapp/resources/presetpkgs/8001654057944134.amr"
+"patches/presetpkgs/8001657592345846.amr" = "/etc/miniapp/resources/presetpkgs/8001657592345846.amr"
+"patches/presetpkgs/8001661999525016.amr" = "/etc/miniapp/resources/presetpkgs/8001661999525016.amr"
+"patches/presetpkgs/8001670668055425.amr" = "/etc/miniapp/resources/presetpkgs/8001670668055425.amr"
+"patches/presetpkgs/8001671616562847.amr" = "/etc/miniapp/resources/presetpkgs/8001671616562847.amr"
+"patches/presetpkgs/8001673244388308.amr" = "/etc/miniapp/resources/presetpkgs/8001673244388308.amr"
+"patches/presetpkgs/8080212246010681.amr" = "/etc/miniapp/resources/presetpkgs/8080212246010681.amr"
+"patches/presetpkgs/8080212335092787.amr" = "/etc/miniapp/resources/presetpkgs/8080212335092787.amr"
+"patches/presetpkgs/8080212483527402.amr" = "/etc/miniapp/resources/presetpkgs/8080212483527402.amr"
+"patches/presetpkgs/8080212680903142.amr" = "/etc/miniapp/resources/presetpkgs/8080212680903142.amr"
+"patches/presetpkgs/8080222437664451.amr" = "/etc/miniapp/resources/presetpkgs/8080222437664451.amr"
+"patches/presetpkgs/8080232418330628.amr" = "/etc/miniapp/resources/presetpkgs/8080232418330628.amr"
+"patches/presetpkgs/8080252464522508.amr" = "/etc/miniapp/resources/presetpkgs/8080252464522508.amr"
+"patches/presetpkgs/8080262605498742.amr" = "/etc/miniapp/resources/presetpkgs/8080262605498742.amr"
+"patches/presetpkgs/8080272425914438.amr" = "/etc/miniapp/resources/presetpkgs/8080272425914438.amr"
+"patches/presetpkgs/8080282263329158.amr" = "/etc/miniapp/resources/presetpkgs/8080282263329158.amr"
+"patches/presetpkgs/8080282888534774.amr" = "/etc/miniapp/resources/presetpkgs/8080282888534774.amr"
+"patches/presetpkgs/8080292157485624.amr" = "/etc/miniapp/resources/presetpkgs/8080292157485624.amr"
+
+[client]                            # 交给 vmgui 的机型 profile（vmgui/profiles/<名>.toml）
+profile = ""
+
+[checks]                            # 启动前校验（MD5 本地计算，用于自校验）
+"images/S6-1-pro-ro-system_b.img" = { md5 = "6e3b2107e37be3dbccc203ac79cb0f33" }
+"images/S6-1-pro-ro-boot_b.img"   = { md5 = "3f85a6da16fd0ec8a1afb67a5436f264" }
+[state]
+# 8 GiB（与 x7 一致）。容量只在创建状态盘时生效：改完要删掉旧的
+# vm/state-s6pro.img（或 up --fresh），已有的盘不会自动扩。
+size_mb = 8192
