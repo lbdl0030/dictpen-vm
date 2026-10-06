@@ -1,4 +1,8 @@
 # ===== 不进版本库的东西 =====
+# Windows 保留名：某些脚本把 `> NUL` 当成空设备，在 Git Bash/PowerShell 下会真的
+# 建出一个叫 NUL 的文件，git index 遇到它会直接报 "NUL: failed to insert into database"
+/NUL
+
 # 运行期产物：每次开机会变（状态盘、日志、截屏、pid、vmgui 输出…）
 vm/
 

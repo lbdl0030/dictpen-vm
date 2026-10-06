@@ -203,3 +203,20 @@ TPEOF
     chmod +x "$TARGET/etc/init.d/S00tp-link"
     echo "pack hook fixup: S00tp-link installed"
 fi
+
+# --- 9. mousedev 缩放 = 面板尺寸（触摸光标对齐，2026-10-06）---------------------
+# 这台 app 的 UI 光标 = /dev/input/mouse0 的增量（mousedev 字节流），点击发生在
+# 光标当前位置。mousedev 把 ABS 增量换算成像素用的 xres/yres 默认是 Debian 内核的
+# 1024x768，与本机面板 640x260 不符 —— 光标每动一次偏 41 倍：命中卡片靠运气，
+# 小目标（返回箭头）永远点不中。参数运行时可写，必须在 miniapp 起来之前写好。
+# PANEL=640x260 来自 pack.env（框架注入）。
+if [ -n "$TARGET" ] && [ -d "$TARGET/etc/init.d" ] && [ -n "$PANEL" ]; then
+    cat > "$TARGET/etc/init.d/S00mouse-scale" <<MSCALE
+#!/bin/sh
+# s6pro: mousedev 的 ABS->像素缩放对齐面板（app 光标走 mouse0 增量）
+echo ${PANEL%x*} > /sys/module/mousedev/parameters/xres 2>/dev/null
+echo ${PANEL#*x} > /sys/module/mousedev/parameters/yres 2>/dev/null
+MSCALE
+    chmod +x "$TARGET/etc/init.d/S00mouse-scale"
+    echo "pack hook fixup: S00mouse-scale installed (PANEL=$PANEL)"
+fi

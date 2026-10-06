@@ -44,14 +44,6 @@ use constant {
     REL_WHEEL => 0x08,
     BTN_LEFT => 0x110,      # 272: what the tablet sends
     BTN_TOUCH => 0x14a,     # 330: what the pen UI listens for
-    # Multi-touch protocol B（x5pro 3.4.6 app 专属问题，2026-10-05）：真机的 I2C
-    # 触摸是 MT-B 设备，这台 app 的 ts 读取器只认 ABS_MT_* 帧 —— 完美的单点
-    # BTN_TOUCH+ABS_X/Y 流对它完全无效（网格扫描 8 个位置零反应）。桥因此同时
-    # 发两套：单点（tslib 式读取器）+ MT-B（这台 app）。其余机型不受影响。
-    ABS_MT_SLOT => 0x2f,
-    ABS_MT_POSITION_X => 0x35,
-    ABS_MT_POSITION_Y => 0x36,
-    ABS_MT_TRACKING_ID => 0x39,
     # The pen's own touchscreen reports panel pixels (cfg.json carries only
     # tp_xoffset/tp_yoffset, no scaling), so the bridge must publish exactly the
     # range the UI is using - otherwise every touch lands offset.
@@ -221,9 +213,7 @@ logmsg(sprintf('source x %d..%d y %d..%d -> panel %d x %d',
 sysopen(my $ui, UINPUT, O_WRONLY | O_NONBLOCK)
     or die "touchbridge: open " . UINPUT . ": $! (is uinput loaded?)\n";
 for my $b ([UI_SET_EVBIT, EV_SYN], [UI_SET_EVBIT, EV_KEY], [UI_SET_EVBIT, EV_ABS],
-           [UI_SET_KEYBIT, BTN_TOUCH], [UI_SET_ABSBIT, ABS_X], [UI_SET_ABSBIT, ABS_Y],
-           [UI_SET_ABSBIT, ABS_MT_SLOT], [UI_SET_ABSBIT, ABS_MT_POSITION_X],
-           [UI_SET_ABSBIT, ABS_MT_POSITION_Y], [UI_SET_ABSBIT, ABS_MT_TRACKING_ID]) {
+           [UI_SET_KEYBIT, BTN_TOUCH], [UI_SET_ABSBIT, ABS_X], [UI_SET_ABSBIT, ABS_Y]) {
     ioctl_ok($ui, $b->[0], $b->[1]);
 }
 
@@ -231,17 +221,11 @@ for my $b ([UI_SET_EVBIT, EV_SYN], [UI_SET_EVBIT, EV_KEY], [UI_SET_EVBIT, EV_ABS
 my @absmax = (0) x 64;
 $absmax[ABS_X] = $panel_x - 1;
 $absmax[ABS_Y] = $panel_y - 1;
-$absmax[ABS_MT_SLOT] = 9;                 # 单指即可，但给满 10 个 slot
-$absmax[ABS_MT_POSITION_X] = $panel_x - 1;
-$absmax[ABS_MT_POSITION_Y] = $panel_y - 1;
-$absmax[ABS_MT_TRACKING_ID] = 0xffff;
-my @absmin = (0) x 64;
-$absmin[ABS_MT_TRACKING_ID] = -1;         # -1 = 手指抬起（MT-B 约定）
 my $udev = pack('a80', DEV_NAME)
          . pack('S4', BUSTYPE, VENDOR, PRODUCT, VERSION)
          . pack('l', 0)
          . pack('l*', @absmax)
-         . pack('l*', @absmin)
+         . pack('l*', (0) x 64)                # absmin
          . pack('l*', (0) x 64)                # absfuzz
          . pack('l*', (0) x 64);               # absflat
 syswrite($ui, $udev) == length($udev) or die "touchbridge: uinput_user_dev: $!\n";
@@ -277,21 +261,13 @@ my $down = 0;                       # is the guest touch currently pressed?
 my $dragging = 0;                   # did this touch exceed the click slop?
 my ($slop_x, $slop_y);              # position where the touch went down
 my $abs_seen = 0;                   # a frame carried new coordinates
-my $mt_id = 0;                      # MT-B tracking id（每次按下递增）
 
 sub touch_press {
     my ($x, $y) = (to_panel(ABS_X, $pos[ABS_X]), to_panel(ABS_Y, $pos[ABS_Y]));
-    # MT-B 帧：真机触摸是 MT-B 设备，这台 app 只认它（见文件头说明）
-    write_ev(EV_ABS, ABS_MT_SLOT, 0);
-    write_ev(EV_ABS, ABS_MT_TRACKING_ID, $mt_id);
-    write_ev(EV_ABS, ABS_MT_POSITION_X, $x);
-    write_ev(EV_ABS, ABS_MT_POSITION_Y, $y);
-    # 单点帧（tslib 式读取器仍然要）
     write_ev(EV_ABS, ABS_X, $x);
     write_ev(EV_ABS, ABS_Y, $y);
     write_ev(EV_KEY, BTN_TOUCH, 1);
     write_ev(EV_SYN, SYN_REPORT, 0);
-    $mt_id = ($mt_id + 1) & 0x7fff;
     ($slop_x, $slop_y) = ($x, $y);
     $down = 1;
     $dragging = 0;
@@ -299,7 +275,6 @@ sub touch_press {
 }
 
 sub touch_release {
-    write_ev(EV_ABS, ABS_MT_TRACKING_ID, -1);
     write_ev(EV_KEY, BTN_TOUCH, 0);
     write_ev(EV_SYN, SYN_REPORT, 0);
     $down = 0;

@@ -104,6 +104,22 @@ ALCAP
     echo "pack hook fixup: S00applog-cap installed"
 fi
 
+# --- 6b. mousedev 缩放 = 面板尺寸 ----------------------------------------------
+# 这台 app 的 UI 光标 = /dev/input/mouse0 的增量（mousedev 字节流）。mousedev 把
+# ABS 增量换算成像素用的 xres/yres 默认是 Debian 内核的 1024x768，与本机面板
+# 800x254 不符 —— 光标每动一次偏 41 倍。参数运行时可写（实测），必须在 miniapp
+# 起来之前写好。PANEL=800x254 来自 pack.env（框架注入）。
+if [ -n "$TARGET" ] && [ -d "$TARGET/etc/init.d" ] && [ -n "$PANEL" ]; then
+    cat > "$TARGET/etc/init.d/S00mouse-scale" <<MSCALE
+#!/bin/sh
+# x5pro: mousedev 的 ABS->像素缩放对齐面板（app 光标走 mouse0 增量）
+echo ${PANEL%x*} > /sys/module/mousedev/parameters/xres 2>/dev/null
+echo ${PANEL#*x} > /sys/module/mousedev/parameters/yres 2>/dev/null
+MSCALE
+    chmod +x "$TARGET/etc/init.d/S00mouse-scale"
+    echo "pack hook fixup: S00mouse-scale installed (PANEL=$PANEL)"
+fi
+
 # --- 7. perl（触摸桥运行时；rootfs 无 perl）------------------------------------
 # 框架的 touchbridge 钩子硬编码 /usr/bin/perl。素材来自 s6pro/s7pro 包的 perl-tree
 # （Debian armhf perl-base 5.20，guest 内核的 COMPAT 层直接跑）。
