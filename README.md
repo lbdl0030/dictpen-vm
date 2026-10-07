@@ -47,7 +47,7 @@ stop-vm.cmd         :: 关闭虚拟机
 
 | 能力 | 状态 |
 |------|------|
-| 实机 rootfs（EROFS）完整引导 | ✅ YoudaoOS 4.7.4，主机名 `YoudaoDictionaryPen-000` |
+| 实机 rootfs（EROFS）完整引导 | ✅ 主机名 `YoudaoDictionaryPen-000` |
 | root SSH 登录（密钥认证，端口 2222） | ✅ |
 | 串口控制台（TCP 4444，可脚本化） | ✅ |
 | 可写根文件系统（overlayfs） | ✅ 改动本次运行有效 |
