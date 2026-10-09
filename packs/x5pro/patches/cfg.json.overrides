@@ -11,10 +11,29 @@
 #   direction 0  真机面板 direction=270（cvifb start_x=113 width=254，显示引擎旋转
 #                扫描）；VM 的 bochs-display 没有平面旋转，UI 必须 1:1 写入
 #                framebuffer，否则画面斜切。
-#   tp           真机触摸是 platform-4020000.i2c-event（I2C 触摸芯片）；这台 app
-#                实际读 /dev/input/mouse0（mousedev，不走 tslib/evdev），tp 只是
-#                兜底路径 —— 指到 by-path/axs_ts（框架 touchbridge 桥或裸 tablet）。
+#   tp           真机触摸是 platform-4020000.i2c-event（I2C 触摸芯片）；VM 里由
+#                触摸桥（[adapt].touchbridge）创建触摸屏并建软链
+#                /dev/input/by-path/axs_ts。
+#   tp_direction **写成 0**，tp_xoffset/tp_yoffset 归零（2026-10-09 反汇编 + 实测）：
+#                libfalcon 的 `greenui::winInputLoop`（x5pro 0x1ca7a8）里
+#                `dir=0` 分支就是恒等（x=ABS_X−tp_xoffset、y=ABS_Y−tp_yoffset），
+#                而 `dir=180` 分支会做 `min(W−1, max(0, W−1−v))` 的 180° 镜像。
+#                实测（面板 800x254）：dir=0 点 (100,60) 派发 (100,60)；
+#                dir=180 同一交点派发 (699,193) = (799−100, 253−60)。
+#                桥直接上报 UI 像素即可，不需要任何旋转。
+#                （旧结论"写 180 才恒等"是把 mouse 链的假坐标误当成了 TP 的结果。）
+#
+# 另：这台 app 同时打开 `device.tp`(evdev) 与 `device.mouse`(mousedev) 两条输入链，
+#     两条都喂同一个 (x,y)。mouse 链是**增量累加**的，会在自身光标处额外注入一条
+#     坐标 (0,0) 的假 DOWN —— 那条假 DOWN 落在屏幕左缘，触发 `LeftSwipeBackGesture`
+#     并把 UI 打崩（日志实证：假 DOWN(0,0) -> LeftSwipeBackGesture onHandle ->
+#     Segmentation fault）。所以 `device.mouse` 置空，只留 TP 链。
+#     因为框架的覆盖表只支持"数字/以 / 开头的字符串/true|false"三种值，表达不了
+#     空字符串，所以这一项由包内 fixup 的 `S00cfg-tp` 钩子在 guest 阶段写入。
 width=800
 height=254
 direction=0
+tp_direction=0
+tp_xoffset=0
+tp_yoffset=0
 tp=/dev/input/by-path/axs_ts

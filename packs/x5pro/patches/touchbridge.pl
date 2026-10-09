@@ -44,6 +44,15 @@ use constant {
     REL_WHEEL => 0x08,
     BTN_LEFT => 0x110,      # 272: what the tablet sends
     BTN_TOUCH => 0x14a,     # 330: what the pen UI listens for
+    BTN_TOOL_FINGER => 0x145,
+    # 本机（x5pro，app 3.4.6）的触摸读取器按 MT 协议 B 解析：只发单点帧
+    # （ABS_X/ABS_Y + BTN_TOUCH）时它一条都不派发（dispatchTouchEvent 0 条），
+    # 补上 MT-B 帧后才有反应 —— 已在同版本 app 上实测确认，所以这里比 s6pro
+    # 多出一组 MT-B 帧（单点帧同时保留，tslib/老读法也满足）。
+    ABS_MT_SLOT => 0x2f,
+    ABS_MT_POSITION_X => 0x35,
+    ABS_MT_POSITION_Y => 0x36,
+    ABS_MT_TRACKING_ID => 0x39,
     # The pen's own touchscreen reports panel pixels (cfg.json carries only
     # tp_xoffset/tp_yoffset, no scaling), so the bridge must publish exactly the
     # range the UI is using - otherwise every touch lands offset.
@@ -213,14 +222,22 @@ logmsg(sprintf('source x %d..%d y %d..%d -> panel %d x %d',
 sysopen(my $ui, UINPUT, O_WRONLY | O_NONBLOCK)
     or die "touchbridge: open " . UINPUT . ": $! (is uinput loaded?)\n";
 for my $b ([UI_SET_EVBIT, EV_SYN], [UI_SET_EVBIT, EV_KEY], [UI_SET_EVBIT, EV_ABS],
-           [UI_SET_KEYBIT, BTN_TOUCH], [UI_SET_ABSBIT, ABS_X], [UI_SET_ABSBIT, ABS_Y]) {
+           [UI_SET_KEYBIT, BTN_TOUCH], [UI_SET_KEYBIT, BTN_TOOL_FINGER],
+           [UI_SET_ABSBIT, ABS_X], [UI_SET_ABSBIT, ABS_Y],
+           [UI_SET_ABSBIT, ABS_MT_SLOT], [UI_SET_ABSBIT, ABS_MT_POSITION_X],
+           [UI_SET_ABSBIT, ABS_MT_POSITION_Y], [UI_SET_ABSBIT, ABS_MT_TRACKING_ID]) {
     ioctl_ok($ui, $b->[0], $b->[1]);
 }
 
 # Legacy uinput_user_dev: name + input_id + ff_effects_max + 4 abs arrays.
+# 所有轴都用 **UI 坐标量程**（800x254）：桥上报的就是 UI 像素（见 touch_press）。
 my @absmax = (0) x 64;
 $absmax[ABS_X] = $panel_x - 1;
 $absmax[ABS_Y] = $panel_y - 1;
+$absmax[ABS_MT_SLOT] = 9;
+$absmax[ABS_MT_POSITION_X] = $panel_x - 1;
+$absmax[ABS_MT_POSITION_Y] = $panel_y - 1;
+$absmax[ABS_MT_TRACKING_ID] = 0xffff;
 my $udev = pack('a80', DEV_NAME)
          . pack('S4', BUSTYPE, VENDOR, PRODUCT, VERSION)
          . pack('l', 0)
@@ -261,11 +278,32 @@ my $down = 0;                       # is the guest touch currently pressed?
 my $dragging = 0;                   # did this touch exceed the click slop?
 my ($slop_x, $slop_y);              # position where the touch went down
 my $abs_seen = 0;                   # a frame carried new coordinates
+my $mt_id = 0;                      # MT-B tracking id, bumped on every press
+
+# MT-B 帧（见常量区说明）：SLOT 固定 0（单指），每次按下换一个 TRACKING_ID，
+# 抬起时 TRACKING_ID = -1。
+sub mt_down {
+    my ($x, $y) = @_;
+    write_ev(EV_ABS, ABS_MT_SLOT, 0);
+    write_ev(EV_ABS, ABS_MT_TRACKING_ID, $mt_id);
+    write_ev(EV_ABS, ABS_MT_POSITION_X, $x);
+    write_ev(EV_ABS, ABS_MT_POSITION_Y, $y);
+    write_ev(EV_KEY, BTN_TOOL_FINGER, 1);
+    $mt_id = ($mt_id + 1) & 0x7fff;
+}
+
+sub mt_up {
+    write_ev(EV_ABS, ABS_MT_TRACKING_ID, -1);
+    write_ev(EV_KEY, BTN_TOOL_FINGER, 0);
+}
 
 sub touch_press {
     my ($x, $y) = (to_panel(ABS_X, $pos[ABS_X]), to_panel(ABS_Y, $pos[ABS_Y]));
+    # 单点帧 + MT-B 帧合在同一次 SYN 里发出（与真机 AXS 面板一样）：
+    # 分两次 SYN 发会多派发一条坐标过期的 DOWN。
     write_ev(EV_ABS, ABS_X, $x);
     write_ev(EV_ABS, ABS_Y, $y);
+    mt_down($x, $y);
     write_ev(EV_KEY, BTN_TOUCH, 1);
     write_ev(EV_SYN, SYN_REPORT, 0);
     ($slop_x, $slop_y) = ($x, $y);
@@ -275,6 +313,7 @@ sub touch_press {
 }
 
 sub touch_release {
+    mt_up();
     write_ev(EV_KEY, BTN_TOUCH, 0);
     write_ev(EV_SYN, SYN_REPORT, 0);
     $down = 0;
@@ -335,6 +374,8 @@ while (1) {
                     $dragging = 1;             # a real drag: follow the pointer
                     write_ev(EV_ABS, ABS_X, $x);
                     write_ev(EV_ABS, ABS_Y, $y);
+                    write_ev(EV_ABS, ABS_MT_POSITION_X, $x);
+                    write_ev(EV_ABS, ABS_MT_POSITION_Y, $y);
                     write_ev(EV_SYN, SYN_REPORT, 0);
                 }
             }

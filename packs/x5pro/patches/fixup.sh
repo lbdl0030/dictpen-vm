@@ -188,3 +188,29 @@ DBEOF
     sed -i '/dropbear/d' "$TARGET/etc/inittab" 2>/dev/null
     echo "pack hook fixup: strace + dropbear (arm64) installed"
 fi
+
+# --- 9. 触摸参数：在 guest 阶段再覆盖一次 cfg.json（overlay 的 upper 会遮蔽）---
+# 框架的 cfg.json.overrides 是在 initramfs 阶段改的，那时 $TARGET 是**只读根**
+# （overlay 的 lower）。/etc/miniapp/resources/cfg.json 一旦被写进 upper
+# （app 或系统组件保存过一次），overlay 合并时 **upper 优先**，框架的修改就被
+# 遮蔽了 —— 实测：改 lower 后 app 读到的仍是旧值（tp_direction 三个取值
+# 0/90/270 行为完全一样，就是这个原因）。
+# So：这里生成一个 S00 钩子（在 app 由 S50 启动之前跑），对**合并视图**再应用
+# 一次触摸参数。幂等（每次开机都写同样的值）。
+if [ -n "$TARGET" ] && [ -d "$TARGET/etc/init.d" ]; then
+    cat > "$TARGET/etc/init.d/S00cfg-tp" <<'CFGTP'
+#!/bin/sh
+# x5pro: 触摸参数写进 overlay 的合并视图（upper 会遮蔽 initramfs 阶段改的 lower）
+# tp_direction=0 是恒等变换；device.mouse 置空以去掉 mouse 链注入的假 DOWN(0,0)
+# （见 packs/x5pro/patches/cfg.json.overrides 的注释与 README §6.7）
+CFG=/etc/miniapp/resources/cfg.json
+[ -f "$CFG" ] || exit 0
+sed -i -e 's/"tp_direction": *[0-9]*/"tp_direction": 0/' \
+       -e 's/"tp_xoffset": *[0-9]*/"tp_xoffset": 0/' \
+       -e 's/"tp_yoffset": *[0-9]*/"tp_yoffset": 0/' \
+       -e 's#"mouse":[[:space:]]*"[^"]*"#"mouse": ""#' "$CFG" 2>/dev/null
+exit 0
+CFGTP
+    chmod +x "$TARGET/etc/init.d/S00cfg-tp"
+    echo "pack hook fixup: S00cfg-tp installed"
+fi

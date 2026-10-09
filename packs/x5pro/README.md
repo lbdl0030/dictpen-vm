@@ -84,7 +84,7 @@ libyocr 初始化链要 CVITEK TPU（/dev/ion、/dev/cvi-tpu0），VM 没有。
   cfg_overlay `width=800/height=254/direction=0` —— 虚拟屏 = fb = UI 版式，
   1:1 写入，完整正立（`vm/x5-home.png`）。
 
-## 6. 触摸：事件全通、UI 无响应（未解，取证完整）
+## 6. 触摸：已通（根因与修法见 §6.7；§6.1–§6.6 是排查过程记录）
 
 这台 app（3.4.6）的输入读取（strace 实证）：
 
@@ -156,3 +156,157 @@ libyocr 初始化链要 CVITEK TPU（/dev/ion、/dev/cvi-tpu0），VM 没有。
 2. 状态盘当前 77% 占用：`[state] size_mb=2048` 已声明，旧盘跑一段时间后
    `up --fresh` 重建即可。
 3. 验证激活/账号链路（license 已写开发凭证，账号云功能依赖网络，未深测）。
+
+### 6.5 触摸深挖续（2026-10-06/07，仍未闭环）
+
+本轮把事件链逐层验证到"全部通畅"，但 app 的 UI 依旧不响应。证据链更新：
+
+| 层 | 2026-10-06/07 实测 |
+|----|------------------|
+| QEMU 核心分发 | ftrace `input_event <-virtinput_recv_events`：tap 的 ABS+BTN+SYN **全部到达 guest 内核输入核心**（此前"abs 不投递"的结论是抓包脚本被 ssh 会话清掉的假象——vendor busybox 无 `timeout`，`(dd ... &)` 随 ssh 断开被杀） |
+| 桥转发 | 旋转桥（`touchbridge-rot.pl`→`touchbridge.pl`）把 tablet 的横屏 ABS 旋转成竖屏物理坐标（MT_X=Uy、MT_Y=799-Ux），MT-B+单点双帧，写入成功无报错 |
+| app 读取 | strace：app 的 ts 读取线程（fd6=event2）完整读到上述帧 |
+| app 派发 | zlog 提级 DEBUG 后（`zlog_miniapp.conf` 的 `*.WARN`→`*.DEBUG`）：`FBNativeWindow::dispatchTouchEvent action=1, x=0.000000, y=0.000000` —— **tap 时序精确、坐标恒 (0,0)** |
+
+**新确认的事实**：
+
+- 这台 app（3.4.6）的 UI 触摸坐标来源**不是** fd6（event2，cfg tp）也不是 mouse0 光标
+  ——两个流都正常送达，派发坐标恒 (0,0)；
+- 其 libfalcon.so 有**硬编码 `/dev/input/event0`** 字符串（真机上 I2C 触摸最先枚举
+  = event0；VM 里 event0 = virtio 键盘）——**alias 成 event0 的实验必须保证
+  alias 先于 app 启动**（上轮时序没满足，未重做干净）；
+- mouse0 光标初值疑似屏幕中心（x5cal 网格扫描推断），相对增量式点击带 +center
+  偏移，但这不是唯一问题（任何位置都不导航）。
+
+**本轮已固化的基建**（对未来任何修法都有用）：
+
+- `touchbridge.pl` 升级为**旋转桥**：MT-B + 单点双帧、竖屏物理坐标旋转
+  （MT_X=Uy+110、MT_Y=799-Ux）、**BTN_TOOL_FINGER** 标记、
+  udev `seat` 标签直写（fork 子进程等 /run/udev 出现后写 c13:N 数据库条目，
+  因为 S00 桥先于 S10 udevd 运行，规则来不及）；
+- `S00mouse-scale`：mousedev 的 xres/yres 对齐面板（app 若走 mouse0 光标路径，
+  增量单位正确）；
+- uinput 接口改用 **legacy write(uinput_user_dev)** 路径（现代 UI_ABS_SETUP 的
+  ioctl 组合在 perl 下 EINVAL，legacy 已在 s6pro/s7pro 验证）。
+
+**下一步（按价值排序）**：
+
+1. **干净重做 event0 别名实验**：桥启动后（S00）立即
+   `rm /dev/input/event0 && mknod /dev/input/event0 c 13 N`（N=桥设备次设备号），
+   再让 app 启动——验证 falcon 的硬编码 event0 是否就是它的触摸源；
+2. 逆向 libfalcon 的触摸坐标变换：从 `dispatchTouchEvent` 的调用方往上找
+   坐标来源（是 event0 的 EV_ABS 还是别的），确定期望的协议/量程；
+3. 对照 s6pro（同族、fbdev、触摸正常）：diff 两台 app 的输入相关库版本，
+   找 3.4.6 输入栈的架构差异。
+
+### 6.6 最终状态（2026-10-07，本会话收尾）
+
+所有外部手段已穷尽。事件链每一层都用工具验证通过（QEMU trace、内核 ftrace
+`input_event <-virtinput_recv_events`、桥的 uinput 写入、app 的 strace 读取），
+但 app 的 `dispatchTouchEvent` 坐标恒 (0,0)——包括在 event0 别名生效、MT-B 协议、
+旋转坐标、mousedev 缩放对齐等所有组合下。两个标定点的坐标变换拟合互斥，
+3.4.6 app 的坐标源是内部状态，不随外部事件流更新。
+
+**已验证不读的设备**：/dev/input/event0（别名后 fd 表不变）。
+**app 的输入 fd**：mouse0（mousedev 字节流，增量恒 0）+ event2（cfg tp，
+本桥触摸屏，帧完整）。
+
+**触摸挂起**。要恢复触摸需要逆向 3.4.6 app 的输入派发（libfalcon 的
+`dispatchTouchEvent` 调用链），或对照同族可工作版本 diff 输入库。
+本轮基建（旋转桥、udev 标签、mousedev 缩放、DEBUG 日志）全部保留，
+复用时直接可用。
+
+### 6.7 触摸已通（2026-10-09，本会话解决）
+
+反汇编 libfalcon（`greenui::winInputLoop` @ `0x1ca7a8`）后，前几轮的困惑全部
+收敛到两个真实原因，§6.6 的"坐标源是内部状态"结论**被推翻**——
+
+#### 根因一：cfg 里 `tp_direction` 写错了（180 → 应为 0）
+
+`winInputLoop` 同时 poll **两个设备**，各自 feed 同一个 `(s17, s16)`：
+
+| 链 | 设备 | cfg 键 | 解析 | 坐标变换 |
+|----|------|--------|------|----------|
+| TP | fd = cfg `device.tp` | `tp` | 16B `input_event`：`EV_ABS` code 0/0x35→X、1/0x36→Y；`EV_KEY` 330→落/抬；`EV_SYN`→派发 | 按 `tp_direction` 分支 |
+| 鼠标 | fd = cfg `device.mouse` | `mouse` | mousedev 3 字节（buttons/dx/dy，bit4/5 是符号位） | **增量累加**，不做方向变换 |
+
+`tp_direction` 各分支（W/H = 窗口宽高，VM 里是 800/254，不是 0）：
+
+```
+dir=0   : x = ABS_X - tp_xoffset            y = ABS_Y - tp_yoffset      <- 恒等
+dir=90  : x = H-1-y'                        y = W-1-x'
+dir=180 : x = min(W-1, max(0, W-1-x'))      y = min(H-1, max(0, H-1-y'))  <- 180° 镜像
+dir=270 : x = y'                            y = W-1-x'
+```
+
+实测（面板 800×254，桥上报 UI 像素）：`dir=0` 点 (100,60) → 派发 **(100,60)**；
+`dir=180` 同一点 → **(699,193)** = (799−100, 253−60)。
+
+§6.6 之所以判定"写 180 才恒等"，是把**鼠标链的假坐标**（见根因二）当成了 TP 的
+结果：鼠标链的光标初值是 (0,0)，于是 TP 的正确值被假 DOWN 覆盖/混淆。
+
+#### 根因二：`device.mouse` 那条链会注入一条假 DOWN(0,0)
+
+mouse 链是增量累加的。app 同时读 mouse0 与 TP 设备，每次点击会派发**两条 DOWN**：
+TP 链的（坐标正确）+ mouse 链的（在光标位置，通常是 (0,0)）。那条 (0,0) 落在屏幕
+左缘，触发 `LeftSwipeBackGesture` / `TopSwipeGesture`，随后 SEGV：
+
+```
+dispatchTouchEvent action=1, x=0,   y=3      <- mouse 链的假 DOWN
+LeftSwipeBackGesture Start
+dispatchTouchEvent action=1, x=689, y=124    <- TP 链的正确值
+LeftSwipeBackGesture onHandle
+Segmentation fault
+```
+
+把 `device.mouse` 置空后，只剩 TP 一条链，派发变成干净的
+`action=1 → 3 → 2` 且坐标正确。
+
+#### 落地的改动
+
+- `patches/cfg.json.overrides`：`tp_direction=0`（`tp_xoffset/tp_yoffset=0` 不变）；
+- `patches/fixup.sh` 的 `S00cfg-tp` 钩子：`tp_direction=0` + `device.mouse=""`
+  （框架的覆盖表只认"数字 / 以 `/` 开头的字符串 / `true|false`"三种值，**表达不了
+  空字符串**，所以这一项只能在 guest 阶段由包内钩子写；该钩子同时解决 overlay
+  upper 遮蔽问题——见 §6.2 与 fixup 里的注释）；
+- `patches/touchbridge.pl`：与 s6pro 同源，另加一组 **MT-B 帧**
+  （`ABS_MT_SLOT/TRACKING_ID/POSITION_X/Y` + `BTN_TOOL_FINGER`），单点帧保留；
+  所有轴量程 = 面板像素（800×254），上报 **UI 坐标**，不做旋转。
+
+#### 验证（2026-10-09，重启 VM 后）
+
+```
+$ dpctl tap 205 130        # 卡片之间的空白
+dispatchTouchEvent action=1, x=205, y=129
+dispatchTouchEvent action=3, x=205, y=129
+dispatchTouchEvent action=2, x=205, y=129
+```
+连点两次坐标稳定，app 不崩；点 (100,60) → (100,60)、(599,130) → (599,129)。
+
+**踩过的坑**（复现时注意）：
+
+- **桥重启后必须重启 app**：桥死掉会销毁它创建的 uinput 设备，而 app 的 fd 仍指向
+  那个已销毁的节点，读不到事件 → 派发恒 (0,0)。看起来像"坐标又坏了"，其实是
+  fd 失效。验证脚本一律"先起桥、再重启 app"。
+- **内核会过滤重复的 ABS**：同一坐标连点，只有变化的轴产生事件（实测第二次点击
+  只到 `ABS_X`）。桥靠缓存值不受影响，但**抓包只看一次会以为 ABS_Y 丢了**。
+- **`dbuffer` 不能关**：把 cfg 的 `dbuffer` 改成 false 会让这台 app 彻底黑屏
+  （它走双缓冲才上屏），已验证后恢复 true。
+- vendor busybox 无 `timeout`、PowerShell 会吃 `$()` 与管道——脚本一律写文件再执行。
+
+#### 遗留：点中卡片后 app 崩溃（与触摸无关）
+
+点空白不崩；点中卡片时 **同一个触摸线程在 UP/MOVE 之后约 80ms SEGV**
+（`BottomSwipeGesture ACTION_DOWN` 在两个场景里都打，所以不是手势本身）：
+
+```
+dispatchTouchEvent action=1, x=599, y=129
+BottomSwipeGesture ACTION_DOWN 129.000000, 20.000000, 40.000000
+dispatchTouchEvent action=3, x=599, y=129
+dispatchTouchEvent action=2, x=599, y=129
+Segmentation fault            <- 80ms 后，UI 已经开始执行卡片的动作
+```
+
+即 **UI 已经把点击识别成 click 并去打开卡片对应的功能**（查词翻译 / 有道随身听），
+崩在功能内部——这台 VM 缺相应硬件（摄像头 / 麦克风），属于另一个问题，
+与触摸链路无关。app 静置 300 秒可以完全不崩。

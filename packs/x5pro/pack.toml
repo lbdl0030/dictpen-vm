@@ -1,5 +1,5 @@
 name    = "x5pro"
-note    = "X5pro / Cherry V1 CV1826 / YoudaoOS —— UI/触摸已验证（2026-10-05）"
+note    = "X5pro / Cherry V1 CV1826 / YoudaoOS —— UI + 触摸已通（2026-10-09，见 README §6.7）"
 
 [platform]
 soc     = "cv1826"
@@ -43,6 +43,10 @@ extra       = ["patches/perl-tree",            # fixup 素材：Debian armhf per
 "patches/get_pcba_version.sh"  = "/usr/bin/get_pcba_version"
 "patches/noop_update_engine.sh" = "/usr/bin/update_engine"
 "patches/runDictPen.sh"        = "/usr/bin/runDictPen"
+# 注：2026-10-08 曾用"夹取补丁"（替换 libfalcon.so，把算触摸坐标时的 fmax/fmin
+# 换成直通）试图修 y 恒为 0；2026-10-09 反汇编 + 实测复评后**已撤掉**：窗口尺寸
+# 字段 [win+4]/[win+8] 本来就是 800/254，界内触摸不受夹取影响，真因是 cfg 的
+# tp_direction 与 mouse 链（见 README §6.7），用固件原版 libfalcon 即可。
 # OCR 栈桩化（s7pro README §4 同款方案）：真 libyocr 的初始化链要 CVITEK TPU
 # （cvi_device_mem.cpp:528 assert(0)，实测 miniapp Aborted 重启循环）；这台还有
 # 运行期 dlopen("libyocr.so") 与 libYoudaoStitch 深层符号两条路，所以用"在但不
