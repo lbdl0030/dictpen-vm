@@ -81,21 +81,98 @@ optional = true
 # ---------------------------------------------------------------- 笔的固件（版权属有道）
 # 固件是**一个包**（packs/<名字>/）：镜像、面板参数、HAL 补丁都在一起。框架本身
 # 不含固件，`dpctl packs` 看有哪些包、`dpctl up --pack <名字>` 启动。
+#
+# 每台机器一条，且**都是 optional** —— 只下载你要用的那几台，不必全下
+# （七包镜像合计约 12 GB）。`bootstrap.py` 会按 `files` 里的 upstream 名去 release 里
+# 下载，落盘时**改名为 local（= vm 规范名，pack.toml 认的就是它）**。
+#
+# 上游资产名多数已与 vm 规范名一致；例外是 s7pro（上游带 `_b`，本框架要改名去掉）。
+# x6pro / x7 的镜像目前不在该 release 里（只有 OTA 单包或占位说明），需自行提取，
+# 见各自包内的说明；下面留了注释不用启用。
+
 [[item]]
-id = "firmware"
-what = "笔的固件包 a6pro：rootfs + boot（A6pro / Pear_RV1106 / YoudaoOS 4.7.4）"
+id = "firmware-a6pro"
+what = "a6pro 的镜像：rootfs + boot（A6pro / Pear_RV1106 / YoudaoOS 4.7.4）"
 check = "packs/a6pro/images/a6-2-pro-ro-rootfs.img"
 how = "firmware"
-into = "packs/a6pro/images"                   # 下载的文件放这（= 包内 images/）
+into = "packs/a6pro/images"
 release = "A6pro"
-also = ["packs/a6pro/images/a6-2-pro-ro-boot_b.img"]   # rootfs 之外必需的那一半
+also = ["packs/a6pro/images/a6-2-pro-ro-boot_b.img"]
 page = "https://github.com/lbdl0030/dictpen-rootfs/releases/tag/A6pro"
-note = "版权归网易有道，仅供个人研究；大文件走作者给的网盘（见 releases.json 里该 release 的说明）"
-# 上游文件名 -> 本地文件名, MD5（取自上游 release 说明，实测一致）
+optional = true
+note = "版权归网易有道，仅供个人研究。大文件可能走作者给的网盘，见 releases.json 里该 release 的说明。"
 files = [
-  { upstream = "A6pro_rootfs.img", local = "a6-2-pro-ro-rootfs.img",md5 = "0dfe781b76955f5dfe3d8aedde585c36", size = 1342177280 },
-  { upstream = "A6pro_boot.img", local = "a6-2-pro-ro-boot_b.img",md5 = "6cfa8d8ac37a057999b69a2c5098e201", size = 33554432 },
+  { upstream = "a6-2-pro-ro-rootfs.img", local = "a6-2-pro-ro-rootfs.img", md5 = "0dfe781b76955f5dfe3d8aedde585c36", size = 1342177280 },
+  { upstream = "a6-2-pro-ro-boot_b.img", local = "a6-2-pro-ro-boot_b.img", md5 = "6cfa8d8ac37a057999b69a2c5098e201", size = 33554432 },
 ]
+
+[[item]]
+id = "firmware-a7pro"
+what = "a7pro 的镜像：rootfs + boot（A7pro / RV1106）"
+check = "packs/a7pro/images/a7-1-pro-ro-rootfs_b.img"
+how = "firmware"
+into = "packs/a7pro/images"
+release = "A7pro"
+also = ["packs/a7pro/images/a7-1-pro-ro-boot_b.img"]
+page = "https://github.com/lbdl0030/dictpen-rootfs/releases/tag/A7pro"
+optional = true
+note = "版权归网易有道，仅供个人研究。大文件可能走作者给的网盘，见 releases.json 里该 release 的说明。"
+files = [
+  { upstream = "a7-1-pro-ro-rootfs_b.img", local = "a7-1-pro-ro-rootfs_b.img", md5 = "0d93a0d6d6b06111e0f03c4818a46762", size = 1342177280 },
+  { upstream = "a7-1-pro-ro-boot_b.img", local = "a7-1-pro-ro-boot_b.img", md5 = "bed7f5701a07188b32b852bc36c0bd4f", size = 33554432 },
+]
+
+[[item]]
+id = "firmware-s6pro"
+what = "s6pro 的镜像：system + boot（S6pro / CV1826 / ext4）"
+check = "packs/s6pro/images/S6-1-pro-ro-system_b.img"
+how = "firmware"
+into = "packs/s6pro/images"
+release = "S6pro"
+also = ["packs/s6pro/images/S6-1-pro-ro-boot_b.img"]
+page = "https://github.com/lbdl0030/dictpen-rootfs/releases/tag/S6pro"
+optional = true
+note = "版权归网易有道，仅供个人研究。大文件可能走作者给的网盘，见 releases.json 里该 release 的说明。"
+files = [
+  { upstream = "S6-1-pro-ro-system_b.img", local = "S6-1-pro-ro-system_b.img", md5 = "6e3b2107e37be3dbccc203ac79cb0f33", size = 1610612736 },
+  { upstream = "S6-1-pro-ro-boot_b.img", local = "S6-1-pro-ro-boot_b.img", md5 = "3f85a6da16fd0ec8a1afb67a5436f264", size = 16777216 },
+]
+
+[[item]]
+id = "firmware-s7pro"
+what = "s7pro 的镜像：system + boot（S7pro / CV1826 / erofs）"
+check = "packs/s7pro/images/S7-1-pro-ro-system.img"
+how = "firmware"
+into = "packs/s7pro/images"
+release = "S7pro"
+also = ["packs/s7pro/images/S7-1-pro-ro-boot.img"]
+page = "https://github.com/lbdl0030/dictpen-rootfs/releases/tag/S7pro"
+optional = true
+note = "上游资产名带 `_b`，本框架认的是不带 `_b` 的名字 —— upstream/local 两列就是这次改名。版权归网易有道，仅供个人研究。"
+files = [
+  { upstream = "S7-1-pro-ro-system_b.img", local = "S7-1-pro-ro-system.img", md5 = "234e5d5f6a0be3bd36f8b75f44f9419a", size = 1610612736 },
+  { upstream = "S7-1-pro-ro-boot_b.img", local = "S7-1-pro-ro-boot.img", md5 = "cd005817e4e6271e9ec74a605f01f06e", size = 16777216 },
+]
+
+[[item]]
+id = "firmware-x5pro"
+what = "x5pro 的镜像：rootfs + boot（X5pro / Cherry V1 CV1826 / ext4）"
+check = "packs/x5pro/images/x5-1-pro-ro-rootfs_b.img"
+how = "firmware"
+into = "packs/x5pro/images"
+release = "X5pro"
+also = ["packs/x5pro/images/x5-1-pro-ro-boot_b.img"]
+page = "https://github.com/lbdl0030/dictpen-rootfs/releases/tag/X5pro"
+optional = true
+note = "版权归网易有道，仅供个人研究。大文件可能走作者给的网盘，见 releases.json 里该 release 的说明。"
+files = [
+  { upstream = "x5-1-pro-ro-rootfs_b.img", local = "x5-1-pro-ro-rootfs_b.img", md5 = "d4b8420fff99e8d9daa00d8956c6036b", size = 1610612736 },
+  { upstream = "x5-1-pro-ro-boot_b.img", local = "x5-1-pro-ro-boot_b.img", md5 = "90786ebdfb327d41094fb252e506d575", size = 16777216 },
+]
+
+# ---- 上游暂时没有镜像的包（需要时自己准备，放到对应目录即可）----
+# x6pro：packs/x6pro/images/{system_a.img, boot_a.img}   —— 从 X6pro 的 OTA 包提取，见包内 DEVLOG
+# x7   ：packs/x7/images/x7-system_a.img                 —— 上游该 release 目前只有说明文件
 
 # ---------------------------------------------------------------- 构建产物
 [[item]]
