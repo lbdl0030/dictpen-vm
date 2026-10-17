@@ -48,3 +48,9 @@ hooks = ["patches/prepare.sh"]
 # 实测装完即占 **318/488 MB（67%）**，默认 512 MiB 只剩 160 MB 余量（DEVLOG §5.10）。
 # 加大只在创建时生效：`up --fresh`，或删掉 vm/state-x6pro.img 后再 `up`。
 size_mb = 1024
+
+[dist]
+# 对外分发"可传播代码包"时要额外带上本包的开发记录。默认只带 pack.toml / README.md /
+# cfg.json.overrides / touchbridge.pl 四项，而本包没有 README.md（说明全在同目录的
+# DEVLOG.md 里），所以在这里声明它 —— 不必去改框架的 scripts/package.py。
+include = ["DEVLOG.md"]

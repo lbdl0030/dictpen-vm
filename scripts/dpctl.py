@@ -443,6 +443,8 @@ def cmd_packs(args):
         return 1
     if args.name:
         names = [args.name]
+    for err in runtimes.load_errors():
+        print(f"  [!] runtime 插件未加载：{err}")
     print(f"{'包':<12} {'runtime':<20} {'soc':<8} {'面板':<9} 镜像")
     rc = 0
     for name in names:

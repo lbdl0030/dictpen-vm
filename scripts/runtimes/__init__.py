@@ -2,8 +2,8 @@
 """框架内置的多种"运行框架"（boot backend）。
 
 虚拟机本身不是"某一台机器"，而是一个**能跑多类固件**的框架：一种固件形态对应一个
-runtime。包通过 `pack.toml` 的 `[platform].runtime` 选一个；新增平台 = 加一个模块
-+ 一个包，不需要改 `dpctl.py` 的核心逻辑。
+runtime。包通过 `pack.toml` 的 `[platform].runtime` 选一个；**新增平台 = 往这个目录
+丢一个 `.py` + 一个包**，连本文件都不用改（下面的注册表会自动发现它）。
 
 `Runtime` 是接口（protocol 意义上的），框架只依赖这些方法：
 
@@ -89,20 +89,74 @@ def framework_initrd_default():
 
 
 # --------------------------------------------------------------------------- #
-# 注册表（放在最后：子模块要 import 上面的基类与默认路径）
+# 注册表：**自动发现** `runtimes/*.py` 里的 Runtime 子类
+#
+# 加一个平台 = 往这个目录丢一个 .py（类名随意，只要 `name` 唯一），不必改本文件。
+# 三条契约（写插件时请遵守）：
+#   * runtime 模块的顶层**只做定义、不做副作用** —— 发现过程会 import 它；
+#   * 试验/半成品用 `_` 开头命名，发现过程会跳过它们；
+#   * 单个模块 import 失败**不会**拖垮框架，问题收集在 `load_errors()` 里，
+#     由 `dpctl packs` 打出来。
 # --------------------------------------------------------------------------- #
+import importlib                                              # noqa: E402
+import pkgutil                                                # noqa: E402
+
 from . import rv1106_linux                                    # noqa: E402
 from . import cv18xx_linux                                    # noqa: E402
 from . import rockchip_ext4                                   # noqa: E402
 
-REGISTRY = {c.name: c for c in (rv1106_linux.Rv1106LinuxRuntime,
-                                cv18xx_linux.Cv18xxLinuxRuntime,
-                                cv18xx_linux.Cv18xxLinuxErofsRuntime,
-                                rockchip_ext4.RockchipExt4Runtime)}
+# 显式种子：即使某个模块被改名成 `_xxx.py`（扫描会跳过）也保证在册
+SEED = (rv1106_linux.Rv1106LinuxRuntime,
+        cv18xx_linux.Cv18xxLinuxRuntime,
+        cv18xx_linux.Cv18xxLinuxErofsRuntime,
+        rockchip_ext4.RockchipExt4Runtime)
+
+_LOAD_ERRORS = []
+
+
+def _all_subclasses(cls):
+    for sub in cls.__subclasses__():
+        yield sub
+        yield from _all_subclasses(sub)
+
+
+def _discover():
+    """import `runtimes/*.py`（跳过 `_` 开头的），返回其中的全部 Runtime 子类。"""
+    for mod in sorted(pkgutil.iter_modules(__path__), key=lambda m: m.name):
+        if mod.name.startswith("_"):
+            continue
+        try:
+            importlib.import_module(f"{__name__}.{mod.name}")
+        except Exception as e:                 # noqa: BLE001 插件目录里可能有半成品
+            _LOAD_ERRORS.append(f"{mod.name}.py 导入失败：{type(e).__name__}: {e}")
+    return list(_all_subclasses(Runtime))
+
+
+def _registry():
+    classes = list(SEED) + [c for c in _discover() if c not in SEED]
+    reg = {}
+    for cls in classes:
+        if not getattr(cls, "name", ""):
+            _LOAD_ERRORS.append(f"{cls.__module__}.{cls.__name__} 没有 name，已跳过")
+            continue
+        if cls.name in reg:
+            _LOAD_ERRORS.append(f"runtime 名字重复：{cls.name}"
+                                f"（{reg[cls.name].__module__} 与 {cls.__module__}）")
+            continue
+        reg[cls.name] = cls
+    return reg
+
+
+REGISTRY = _registry()
 
 
 def names():
     return sorted(REGISTRY)
+
+
+def load_errors():
+    """发现过程中的问题（半成品插件、重名、缺 name…）；空 = 全部正常。"""
+    return list(_LOAD_ERRORS)
 
 
 def available():

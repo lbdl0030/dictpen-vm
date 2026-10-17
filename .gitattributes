@@ -1,0 +1,33 @@
+# 行尾纪律：仓库里**一律 LF**。
+#
+# 为什么必须有这个文件：这个项目会把一堆脚本（`scripts/initramfs-init.sh`、
+# 各包的 `patches/*.sh`、无扩展名的 rcS 脚本…）**烘进 Linux guest 的 initramfs 里执行**。
+# 如果它们带上 CRLF，busybox ash 在 `for … in …; do` 这类地方会报
+#     syntax error: unexpected word (expecting "do")
+# 而包的钩子是 `source` 进 PID 1 的 —— 一句语法错就让 init 退出、内核直接 panic。
+# （实测：Windows 上 `core.autocrlf=true` 时 clone/checkout 会把工作区脚本转成 CRLF，
+#  下一次 initrd 重建就把 CRLF 烘进去，机器再也起不来。2026-10-17 踩过。）
+#
+# 所以：文本文件存 LF、检出也 LF；真二进制让 git 自己识别，别被转坏。
+* text=auto eol=lf
+
+# .cmd/.bat 例外：cmd.exe 按 OEM 代码页读脚本，保持 CRLF 最稳。
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# 明确声明为二进制（`text=auto` 一般也能识别，这里只是把大件钉死）
+*.img   binary
+*.so    binary
+*.so.*  binary
+*.amr   binary
+*.tar   binary
+*.gz    binary
+*.cpio.gz binary
+*.dpm   binary
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.bmp   binary
+*.ttf   binary
+*.bin   binary

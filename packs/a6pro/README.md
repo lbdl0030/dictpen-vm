@@ -11,7 +11,7 @@
 | `pack.toml` | 元数据：平台、镜像、面板参数、适配开关、vmgui profile、校验 |
 | `images/a6-2-pro-ro-rootfs.img` | 只读 erofs 根文件系统（1.28 GiB） |
 | `images/a6-2-pro-ro-boot_b.img` | boot 镜像（DTB + 面板/DRM 参数，参数参考用） |
-| `patches/libfalcon.so` | 打过补丁的有道显示 HAL（DRM 格式协商，见框架 README《深度分析》） |
+| `patches/libfalcon.so` | 打过补丁的有道显示 HAL（DRM 格式协商，见 [插件模型 §6](../docs/插件模型.md#6-插件点④显示与输入)） |
 | `patches/logo.fb.gz` | 开机 logo（写 `/dev/fb0`） |
 | `patches/touchbridge.pl` | 鼠标 → 触摸桥（uinput，把 tablet 变成 `axs_ts` 触摸屏） |
 | `patches/cfg.json.overrides` | 只覆盖列出的 `cfg.json` 键（面板尺寸/方向/bpp/触摸路径） |

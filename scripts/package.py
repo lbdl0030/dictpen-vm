@@ -17,13 +17,16 @@ import sys
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import packlib                                                # noqa: E402
 
 # 只带这些（白名单比黑名单安全：新增大文件不会被误打进包里）
 INCLUDE_DIRS = ["scripts", "vmgui", "docs", "deps", ".trae/documents"]
 INCLUDE_FILES = ["README.md", ".gitignore", "run-vm.cmd", "stop-vm.cmd",
                  "ssh-vm.cmd", "console.cmd", "downloads/releases.json"]
-# 固件包只带"描述"，不带固件派生的二进制（那些和镜像一样归有道，且很大）
-PACK_FILES = {"pack.toml", "README.md", "cfg.json.overrides", "touchbridge.pl"}
+# 固件包只带"描述"，不带固件派生的二进制（那些和镜像一样归有道，且很大）。
+# 具体带哪些由**包自己**说了算：`pack.toml` 的 `[dist].include` 追加，缺省是
+# packlib.DIST_DEFAULT 那四项。见 packlib.dist_plan()。
 SKIP_DIRS = {"__pycache__", ".git", ".idea", ".vscode"}
 SKIP_EXT = {".pyc", ".pyo", ".img", ".deb", ".pem", ".key", ".iso", ".zip"}
 
@@ -35,33 +38,73 @@ FORBIDDEN = [("id_*", "SSH 私钥"), ("*.pem", "证书/密钥"), ("*.key", "私�
 MAX_TOTAL = 8 << 20          # 代码+文档应当只有几百 KB；超过就说明混进了大文件
 
 
-def wanted(relpath):
+def dist_plan():
+    """`{包名: {"default": {文件名}, "paths": {包内相对路径}}}`；解析器坏了也照样打包。"""
+    try:
+        return packlib.dist_plan()
+    except Exception:                    # noqa: BLE001 打包自检不该因包解析失败而崩掉
+        return {}
+
+
+def wanted(relpath, dp):
     parts = relpath.replace("\\", "/").split("/")
     if any(p in SKIP_DIRS for p in parts):
         return False
     if os.path.splitext(relpath)[1].lower() in SKIP_EXT:
         return False
-    if parts[0] == "packs":                      # 只带包描述，见 PACK_FILES
-        return os.path.basename(relpath) in PACK_FILES
+    if parts[0] == "packs":                      # 只带包描述，见 packlib.dist_plan()
+        if len(parts) < 2:
+            return False
+        rules = dp.get(parts[1])
+        if rules is None:                        # 包没解析出来：退回默认四项
+            return os.path.basename(relpath) in packlib.DIST_DEFAULT
+        if os.path.basename(relpath) in rules["default"]:
+            return True
+        return "/".join(parts[2:]) in rules["paths"]
     if relpath.replace("\\", "/") in INCLUDE_FILES:
         return True
     return parts[0] in INCLUDE_DIRS
 
 
-def collect():
+def collect(dp):
     files = []
     for dirpath, dirnames, filenames in os.walk(ROOT):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for name in filenames:
             full = os.path.join(dirpath, name)
             rel = os.path.relpath(full, ROOT)
-            if wanted(rel):
+            if wanted(rel, dp):
                 files.append(rel)
     return sorted(files)
 
 
-def self_check(files):
+def dist_problems(dp):
+    """`[dist].include` 的自检：必须是包内相对路径、必须存在、不能是禁止外传的类型。
+
+    这三条是**优先于声明**的硬纪律 —— 包声明了也不放行 `*.img/*.so/*.pem/id_*`。
+    """
     problems = []
+    for name, rules in sorted(dp.items()):
+        for rel in sorted(rules["paths"]):
+            norm = rel.replace("\\", "/")
+            if norm.startswith("/") or ".." in norm.split("/"):
+                problems.append(f"packs/{name}/pack.toml 的 [dist].include 里有"
+                                f"非包内相对路径：{rel}")
+                continue
+            if not os.path.isfile(os.path.join(ROOT, "packs", name, norm)):
+                problems.append(f"packs/{name}/pack.toml 声明的可传播文件不存在：{rel}")
+                continue
+            base = os.path.basename(norm)
+            if os.path.splitext(norm)[1].lower() in SKIP_EXT or any(
+                    fnmatch.fnmatch(base, pat) or fnmatch.fnmatch(norm, pat)
+                    for pat, _ in FORBIDDEN):
+                problems.append(f"packs/{name}/pack.toml 声明了禁止外传的 {rel}"
+                                f"（*.img/*.so/*.pem/id_* 一律不进可传播包）")
+    return problems
+
+
+def self_check(files, dp):
+    problems = dist_problems(dp)
     total = 0
     for rel in files:
         size = os.path.getsize(os.path.join(ROOT, rel))
@@ -83,8 +126,9 @@ def main():
     ap.add_argument("--check", action="store_true", help="只自检，有问题就返回 1")
     args = ap.parse_args()
 
-    files = collect()
-    problems, total = self_check(files)
+    dp = dist_plan()
+    files = collect(dp)
+    problems, total = self_check(files, dp)
     print(f"将打包 {len(files)} 个文件，共 {total / 1024:.0f} KB")
     for rel in files:
         print("  " + rel)

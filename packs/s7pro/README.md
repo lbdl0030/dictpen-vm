@@ -76,7 +76,7 @@ eval $falcon.launchApp fail / TypeError: not a function
 → 框架退回「验证引导」(8080282888534774)，而它不画东西 → 全黑
 ```
 
-这正是《固件包开发教程》§11 的"全黑判据"（a7pro 同型）。根因：**libyocr 的初始化链
+这正是 [`docs/疑难排查.md`](../../docs/疑难排查.md) §0 的"全黑判据"（按截屏字节数分类，a7pro 同型）。根因：**libyocr 的初始化链
 要 CVITEK TPU**（libcviruntime 的 `CviDeviceMem::device_init` 打开 /dev/ion 与
 /dev/cvi-tpu0，QEMU 没有），而这台的 OCR 接入比 s6pro 深三层：
 

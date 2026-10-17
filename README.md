@@ -11,11 +11,13 @@ Rockchip RV1106 平台，系统 **YoudaoOS 4.7.4**），见 `packs/a6pro/README.
 
 | 文档 | 给谁看 | 内容 |
 |------|--------|------|
-| [docs/使用手册.md](docs/使用手册.md) | 拿到这套环境、只想用起来的人 | 重建依赖、取固件、选包启动、看画面与操作、传文件/adb、持久化、虚拟硬件、激活、排查 |
-| [docs/固件包开发教程.md](docs/固件包开发教程.md) | 要加一台新机器的人 | 框架/runtime/包三个概念、`pack.toml` 全字段、patches 语义、initrd 合并机制、做一个 RV1106 同族包、给异构平台写 runtime、调试与检查清单 |
-| [.trae/documents/firmware-packs-design.md](.trae/documents/firmware-packs-design.md) | 想改这套机制的人 | 设计文档：包格式、runtime 接口、换包机制、迁移阶段与验收判据 |
+| [docs/使用手册.md](docs/使用手册.md) | 想用起来的人 | 重建依赖、取固件、选包启动、看画面与操作、传文件/adb、持久化、虚拟硬件、激活 |
+| [docs/固件包开发教程.md](docs/固件包开发教程.md) | 要加一台机器的人 | 三个概念、`pack.toml` 全字段、声明式/命令式适配、写 runtime、调试与检查清单 |
+| [docs/插件模型.md](docs/插件模型.md) | **要改框架 / 写插件的人** | 宿主与四个插件点、决策树、包/runtime/适配/显示接口契约、零机型自检、接口变更纪律 |
+| [docs/疑难排查.md](docs/疑难排查.md) | 卡住的人 | 按现象分类的排查：黑屏/花屏、触摸不响应、联网误判、首启、激活、SSH/adb |
+| [.trae/documents/firmware-packs-design.md](.trae/documents/firmware-packs-design.md) | （**历史设计文档**） | 早期设计：包格式、runtime 接口、换包机制、迁移阶段与验收判据 |
 | [.trae/documents/vmgui-design.md](.trae/documents/vmgui-design.md) | 想改显示前端的人 | vmgui 的配置 schema、适配层接口、模块划分与测试计划 |
-| 本文件 | 想了解**为什么**这么实现的人 | 原理与踩坑记录（DRM 兼容、换掉 virtio-gpu、触摸桥、虚拟 Wi-Fi/蓝牙、激活链路…） |
+| 本文件 | 第一次来的人 | 是什么、快速上手、能力表、`dpctl` 命令、目录结构、引导机制、换机型、分发重建 |
 
 ## 快速开始
 
@@ -56,7 +58,7 @@ stop-vm.cmd         :: 关闭虚拟机
 | 键盘/鼠标输入设备 | ✅ virtio-keyboard/tablet 已接入 |
 | 持久化状态盘（`/state`、`/userdata` 重启不丢） | ✅ 第二块 virtio 盘，首次开机自动格式化 ext4 |
 | PC 端 adb 调试（`adb shell` / `push` / `pull`） | ✅ guest `adbd` 走 TCP，host 侧自动 connect |
-| 有道 UI（miniapp/falcon/Skia）渲染 | ✅ 上屏、方向正确，QEMU 窗口即笔的 560×170 原生分辨率（见"深度分析"） |
+| 有道 UI（miniapp/falcon/Skia）渲染 | ✅ 上屏、方向正确，QEMU 窗口即笔的 560×170 原生分辨率（见"显示与输入"节） |
 | Wi-Fi 硬件虚拟化 | ✅ `mac80211_hwsim` 虚拟网卡（`wlan0`）+ 笔自带的 nl80211 栈（`wpa_supplicant`/`wifi-manager`）；`wlan1` 上是可扫描/可关联的虚拟热点 `Youdao-VM`，并带转发+NAT 上行（见"无线"） |
 | 蓝牙硬件虚拟化 | ⏳ `hci_uart` 挂在第二个串口，宿主 `bt-hci-emu.py` 扮演控制器；guest 内核完成初始化、BlueZ 注册并上电 `hci0`，设备发现待完善 |
 | 跳过激活（开发凭证） | ✅ `S00license` 开机写入 `/userdata/cfg/license`，app 直接进桌面（见"激活与凭证恢复"） |
@@ -132,7 +134,7 @@ python scripts\dpctl.py up
 ### 显示（GUI）
 - 虚拟机通过 **bochs-display** 提供显示设备（线性显存，guest 写内存即上屏），内核创建
   `/dev/fb0`（`bochs-drmdrmfb`），QEMU 用 **GTK 窗口**呈现画面（`-display gtk`）。
-  早期用的是 `virtio-gpu-pci`，因为 falcon 不做 flush 而看不到画面，见《显示：换掉 virtio-gpu》；
+  早期用的是 `virtio-gpu-pci`，因为 falcon 不做 flush 而看不到画面，见 [显示：换掉 virtio-gpu](#显示换掉-virtio-gpu)；
 - 可通过 `console.cmd` 或 SSH 往 `/dev/tty1` 写内容，画面即显示在该窗口。
 - ⚠️ **SDL 后端在本机有兼容问题**（QEMU 主线程会卡死），故使用 GTK；
   若 GTK 不可用，可试 `-display sdl` 或 `-display default`。
@@ -299,100 +301,32 @@ python scripts\dpctl.py sh -c "cat /sys/class/power_supply/battery/capacity"
 - 状态盘不可用时：回落为 tmpfs，改动仅本次运行有效。
 - `dpctl up --fresh` 删除当前包的状态盘（`vm/state-<包>.img`），下次开机重新格式化。
 
-## 深度分析：有道 UI 的 DRM 兼容问题（重要）
+## 显示与输入（原理摘要）
 
-有道的 UI 框架是 **greenui/falcon（Skia 渲染 + 自研 QuickJS 绑定）**，位于
-`/usr/lib/libfalcon.so`（`greenui::DRMNativeWindow`）。它**硬编码走 DRM/KMS**
-（`/dev/dri/card0`），而非 fbdev。
+有道的 UI 框架是 **greenui/falcon**（Skia 渲染），它**硬编码走 DRM/KMS**（`/dev/dri/card0`），
+而非 fbdev。VM 里让它上屏需要：换显示设备为 bochs-display、一套 `libfalcon.so` 二进制补丁、
+再把面板 `cfg.json` 归一化（尺寸/方向/bpp）。**这些都落在固件包里**
+（`packs/a6pro/patches/`，由 `[adapt].replace` / `cfg_overlay` 在开机时应用）。
 
-在虚拟机里让它跑起来遇到一连串问题，已逐个定位并打了二进制补丁
-（**在固件包里**：`packs/a6pro/patches/libfalcon.so`，由包的 `[adapt].replace`
-在开机时覆盖到 guest 的 `/usr/lib/libfalcon.so`）。补丁 1/3 是针对"只有 XRGB8888
-可用"这一类的格式协商问题，在 bochs-drm 上同样成立；补丁 4 是 virtio-gpu 时代留下的
-（当前不再使用 virtio-gpu，保留不影响）：
+原理、补丁清单与勘误（fourcc 非法常量、面板方向归一化、`drmModeSetPlane failed (-13 EACCES)`）
+见 [docs/插件模型.md §6](docs/插件模型.md#6-插件点④显示与输入)；排障个案见 `docs/疑难排查.md`。
 
-| # | 问题 | 位置 | 处理 |
-|---|------|------|------|
-| 1 | 平面格式要 ARGB8888/RGB565，virtio 只给 XRGB8888 | 0x1fe0c0/0x1fe0c4、0x1ff8fc/0x1ff900、0x1ff904/0x1ff908 | fourcc 改为 XR24（见下方勘误） |
-| 2 | crtc/connector 匹配依赖实机 RK 布局 | 0x1ff8f4 / 0x1ff9a0 | 分支 NOP |
-| 3 | 格式列表循环 off-by-one（`count_formats=1` 时永不比较） | 0x1fe10c | 分支 NOP |
-| 4 | 内核 `virtio_gpu_mode_dumb_create` 拒绝 `bpp != 32` | 内核模块 | `b.NE` NOP + 剥离模块签名 |
-| 5 | 面板配置是竖屏（`560×170`, `direction:270`）+ `bpp:16`；笔的 UI 本身就是按 560×170 画的 | `/etc/miniapp/resources/cfg.json` | 运行时 sed 归一化为 `560×170, direction:0, bpp:32` |
-| 6 | virtio-gpu 只给通用模式表，falcon 于是按 640×480 建 fb，UI 缩在角落且窗口尺寸不对 | `build_pen_edid()` → `lib/firmware/edid/pen.bin` | 自定义 560×170 EDID + insmod 传 `edid_firmware` |
-
-> **勘误（重要）**：上表第 1 项原先写错了址与结果——实际这三个 fourcc 是
-> `movw/movt` 组成的 32 位常量，两处 `movt` 的高半字被写成 `#0x432`（应为
-> `#0x3432`），得到一个**非法 fourcc `0x04325258`**；`0x1ff8fc` 处的 `movw`
-> 也漏改，仍是 `ARGB8888`。非法 fourcc 正是 `drmModeAddFB2()` 返回 `EINVAL`
-> 的原因。修好后三处常量都是合法的 `XR24`（`0x34325258`）。
-
-**补丁后的完整链路**（可用实机日志验证，见下）：
-平面搜索通过 → `CREATE_DUMB` ret=0 → `MAP_DUMB` ret=0 → **`drmModeAddFB2()` ret=0**
-→ `drmModeSetPlane` 成功 → **UI 上屏渲染**。
-
-### 如何确认 UI 是否在渲染
-实机自己会把每一步打进日志：
+自检（实机日志）——`AddFB2() ret=0` 且没有 `SetPlane failed` 才算真上屏：
 
 ```bat
-python scripts\dpctl.py sh -c "grep -a -e setSize -e 'AddFB2() ret' -e SetPlane /data/applog/DictPen_*.log | tail"
+python scripts\dpctl.py sh -c "grep -a -e 'AddFB2() ret' -e SetPlane /data/applog/DictPen_*.log | tail"
 ```
 
-- `drmModeAddFB2() ret=0` = framebuffer 创建成功（`-22` 即 EINVAL，见上面勘误）；
-- 出现 `drmModeSetPlane failed` 说明平面没更新，屏幕只会停留在 fbdev 的启动图。
+### 显示：换掉 virtio-gpu
 
-还可以直接从 QEMU 抓当前画面核对（宿主侧）：
-
-```bat
-:: QEMU 监视器 4445：screendump vm\ui.ppm，再转成 PNG 查看
-```
-
-**现状**：UI 能正常上屏、也能用鼠标/`dpctl tap` 操作（见下面《显示：换掉 virtio-gpu》）。
-这条日志检查仍然有用：`drmModeAddFB2() ret=0` + 没有 `drmModeSetPlane failed` 才说明
-falcon 把 framebuffer 建起来了。
-
-### 画面方向与屏幕适配
-实机 `cfg.json` 是 `"width": 560, "height": 170, "direction": 270`：UI 逻辑尺寸 560×170，
-面板方向由 falcon 旋转输出（真机 RK 的 plane 支持旋转）。**VM 里把 `direction` 归一化成
-`0`、显示模式给 560×170**，也就是让 falcon 把 UI **1:1** 写进 framebuffer：
-
-- 留着 270 时 falcon 会认为"目标被旋转过"，按 560 算行跨度去写，而 framebuffer 的 pitch
-  是别的值（竖屏模式下 680，横屏 virtio 下 2240）——**画面就斜切**（上一轮抓到的
-  "斜条/花屏"正是这个）；
-- `direction: 0` + 560×170 模式 ⇒ 写入跨度和 pitch 一致 ⇒ 画面正、没有旋转；
-- `bpp` 也归一化成 32：面板本来要 16bpp(RGB565)，而 guest 的 plane 只吃 32 位格式。
-
-显示模式由 `build_pen_edid()` 生成的自定义 EDID 提供（virtio-gpu 的 `xres/yres` 在这套
-构建里被忽略，bochs-display 我们另外显式传 `xres/yres`）：
-
-- initramfs 里放 560×170 的 EDID（`lib/firmware/edid/pen.bin`）；
-- 加载 `drm`/`drm_kms_helper` 时显式传 `edid_firmware=Virtual-1:edid/pen.bin`
-  （内核 cmdline 的 `module.param=` 只对 userspace modprobe 生效，我们是 busybox
-  `insmod`，必须显式传参）；
-- 结果：`/dev/fb0` 与 QEMU 窗口都是 560×170，UI 满屏、方向正确。
-
-> 踩过的坑：单个异形 detailed timing 会被内核当作 `BAD` 剔除，所以 EDID 里放了**三个
-> vblank 不同**的 560×170 timing，让其中一个活下来。
-
-### 显示：换掉 virtio-gpu（重要，已解决）
-
-**根因**：falcon **直接往 DRM framebuffer 里画，不做任何 dirty / page-flip 通知**
-（`libfalcon.so` 里 `ModePageFlip`/`ModeDirtyFB` 符号出现次数都是 0，只有 `ModeSetPlane`）。
-这对应真机——LCD 控制器一直扫描那块内存，写完就是画面。**virtio-gpu 不是这样**：host 只在
-收到 `RESOURCE_FLUSH` 时才知道新像素，而这个 flush 只在 guest 调
-`DRM_IOCTL_MODE_DIRTYFB` / page-flip 时才发出。于是用 virtio-gpu 时：
-
-- 启动图（app 用 `Show logo` 画、触发过一次 flush）之后 host 再没收到任何指令：
-  `-trace virtio_gpu*` 的 trace 文件大小**完全不变**，屏幕永久停在启动图；
-- app 所有线程都睡在 futex（不是卡在 DRM 等待），它只是"画完就不管了"；
-- 外部进程救不了：对别人的 fb 调 `DRM_IOCTL_MODE_DIRTYFB` 返回 `EPERM`，
-  `DRM_IOCTL_SET_MASTER` 返回 `EBUSY`（master 被 app 占着）。
-
-**解决**：显示设备换成 **`-device bochs-display,xres=560,yres=170`**，initramfs 里按
-`ttm` → `drm_ttm_helper` → `drm_vram_helper` → `bochs` 顺序加载。bochs-drm 的
-framebuffer 就在设备的线性显存里（16MB BAR），QEMU 的扫描输出**直接读它**——guest 写完
-内存画面立刻就变，不需要任何 flush，语义和真机 LCD 控制器一致。启动后 `/dev/fb0` 是
-`bochs-drmdrmfb`；falcon 现成的补丁在新驱动上照样能用（`AddFB2 ret=0`、没有
-`Cannot find plane`）。
+**原因**：falcon 直接往 DRM framebuffer 里画，**不做 dirty / page-flip**（不发
+`RESOURCE_FLUSH`）；而 virtio-gpu 只在收到 flush 时才把新像素传给 host，于是画面永久停在
+启动图（`-trace virtio_gpu*` 的 trace 文件大小不再增长）。**解法**：换成
+**`-device bochs-display,xres=560,yres=170`**——它的 framebuffer 就在设备的线性显存里，
+QEMU 扫描输出直接读，guest 写完内存画面即变（语义同真机 LCD 控制器）。
+initramfs 按 `ttm → drm_ttm_helper → drm_vram_helper → bochs` 顺序加载，启动后 `/dev/fb0`
+是 `bochs-drmdrmfb`。原理详见
+[docs/插件模型.md §6.1](docs/插件模型.md#61-虚拟屏与-edid)。
 
 ### 看画面
 ```bat
@@ -452,65 +386,28 @@ py -3.13 -m vmgui --fullscreen --pointer-mode absolute
 > `dpctl screenshot` 走监视器 4445，不受影响。
 
 ### 触控（鼠标点击 = 触摸笔屏）
-app 从 `cfg.json` 的 `device.tp` 打开触摸设备；实机上它是 `axs_ts.ko` 驱动的**单点触摸屏**
-（`S01systeminit` 里有 `insmod /lib/modules/axs_ts.ko`），只认
-`EV_KEY/BTN_TOUCH` + `EV_ABS/ABS_X,ABS_Y`。
 
-而 QEMU 的 `virtio-tablet-pci` 是**鼠标**：点击只发 `BTN_LEFT`（`evtest` 实测 108 个事件全是 272），
-**从不发 `BTN_TOUCH`**，所以 app 拿到坐标也不认为"按下了"，点击没反应。
-QMP `input-send-event` 的 `key` 事件会被路由到**键盘**，也没法凭空造出 `BTN_TOUCH`。
+app 从 `cfg.json` 的 `device.tp` 打开触摸设备；笔屏是**触摸 UI**（只认 `BTN_TOUCH` +
+`ABS_X/ABS_Y`），而 QEMU 的 `virtio-tablet` 是**鼠标**（点击只发 `BTN_LEFT`、从不发
+`BTN_TOUCH`）——直接点不会有反应。VM 里由包声明的 `touchbridge`（`touchbridge.pl`：用
+uinput 造一个名为 `axs_ts_pen` 的假触摸屏、把 `BTN_LEFT` 翻成 `BTN_TOUCH`、并把 `cfg.json`
+的 `tp` 指到它）桥接。原理与踩坑见
+[docs/插件模型.md §6.4](docs/插件模型.md#64-触控桥)，个案见 `docs/疑难排查.md`。
 
-VM 里用一层翻译桥解决（guest 自带 perl 5.32，不需要编译器）：
+操作：
 
-1. initramfs 打包 `uinput.ko`（`virtio_ring` 等一样在 `insmod` 列表里），得到 `/dev/uinput`；
-2. `scripts/touchbridge.pl` 读 `QEMU Virtio Tablet`，用 uinput 生成一个名为 `axs_ts_pen` 的
-   单点触摸设备（`BTN_TOUCH` + `ABS_X/ABS_Y` **0..559 / 0..169，即面板像素**），把
-   `BTN_LEFT` 改写成 `BTN_TOUCH` 后转发，并建软链 `/dev/input/by-path/axs_ts`；
-   - 量程要和面板一致：实机 `axs_ts` 报的就是面板像素（`cfg.json` 只有
-     `tp_xoffset/tp_yoffset`，没有任何缩放系数），所以桥把 tablet 的 0..32767
-     **重新缩放到 0..559 / 0..169** 再上报（`EVIOCGABS` 读源量程，自动换算）；
-   - 源设备是**按名字**在 `/sys/class/input/*/device/name` 里解析成 `eventN` 的：
-     桥启动太早（S00），那时 udev 还没建 `/dev/input/by-path`；
-   - 按下时会先补发当前 `ABS_X/ABS_Y`，保证"按下"这一帧带着坐标。
-3. initramfs 把 `cfg.json` 的 `tp` 指到 `/dev/input/by-path/axs_ts`；
-4. `/etc/init.d/S00touchbridge` 启动桥并等软链就绪——必须早于 `S01systeminit` 拉起 app；
-   桥没起来时退化成把 `axs_ts` 指向原始 tablet，至少 tp 能打开。
+```bat
+python scripts\dpctl.py tap 280 85   :: 在笔屏坐标注入一次触摸（= 点一下）
+python scripts\dpctl.py pointer      :: GTK 窗口下贴一层触摸反馈指针（up 开窗口时默认自动调出）
+python scripts\dpctl.py nopointer    :: 中途收掉上面的反馈指针
+```
 
-**鼠标 → 触摸的语义**（这部分是踩过坑之后定的，别改回去）：
+- `dpctl tap` 坐标就是笔屏像素（560×170），不需旋转换算；
+- 反馈指针完全在宿主侧（Tk 置顶、可点穿的覆盖层），**vmgui 前端自带反馈环**，用它时不必开
+  `pointer`；排查用 `set DICTPEN_POINTER_DEBUG=1`；
+- ⚠️ vmgui 在前台时一直占着 QMP，此时 `dpctl tap` 会连不上——先关掉 vmgui 窗口。
 
-| 鼠标动作 | guest 看到的事件 |
-|----------|------------------|
-| 移动（不按键） | **什么都不发**——触摸屏没有 hover；老版本会把悬停也当坐标上报，UI 一直处在"拖动中" |
-| 点击 | 同一位置的 `BTN_TOUCH 1` → `BTN_TOUCH 0`。按下的瞬间取当前坐标，**按下期间位移小于 `CLICK_SLOP`(4 面板像素) 的抖动一律吞掉**，否则真实鼠标按键时的 1~2px 抖动会被 UI 当成拖动、按钮永远点不动 |
-| 按住移动 | 超过 `CLICK_SLOP` 后开始逐帧转发坐标 = 拖动手势（拖到哪跟到哪） |
-| 滚轮 | 合成一次**整屏滑动**（`swipe`：按下→8 步纵向移动→抬起），因为笔的列表是用手指滑的，没有滚轮 |
-
-`CLICK_SLOP` 在 `touchbridge.pl` 顶部，点不动就把阈值调小、误判成拖动就调大。
-
-#### 触控反馈指针（`dpctl pointer`）
-笔屏是触摸屏 UI，没有 hover，鼠标点下去之前完全看不出会点在哪。这个反馈指针
-**完全在宿主侧实现**，不碰 guest（因此对 VM 零风险、也不用改 initramfs）：
-
-- 用 Tk 开一个无边框置顶窗口，尺寸/位置**跟着 QEMU 窗口的客户区**（按 QEMU 进程 pid
-  找到其显示窗口：可见、非 tool window、客户区最大那个——GTK 还会建一堆 0×0 的辅助窗口）；
-- 颜色键（`-transparentcolor`）把背景抠成透明，再加 `WS_EX_LAYERED | WS_EX_TRANSPARENT
-  | WS_EX_NOACTIVATE`：**可点穿**（不影响点击笔屏）且**不抢焦点**；
-- 圆点画在"guest 真正收到触摸的位置"：QEMU 把 guest 画面按比例居中缩放，超出画面的位置
-  会被夹到边缘，指针也照这个规则夹到 guest 画面矩形内，所以黑边里也能看出真实的落点；
-- 常态是蓝色空心圈，**按住左键**变成红色实心点；QEMU 窗口被最小化时自动暂停、恢复后继续；
-- 只退出于：QEMU 进程结束，或在该终端里 Ctrl+C；
-- 性能上有三条硬要求，别改回去（否则指针会严重拖尾）：
-  1. **不要每帧 spawn 进程**（最初用 `tasklist` 判存活，一帧几十毫秒 → 明显拖尾）；
-     现在用 `OpenProcess(QUERY_LIMITED_INFORMATION)` + `GetExitCodeProcess` 做存活探测，
-     每 20 帧才查一次，查不到就当作"活着"；
-  2. **不要每帧 EnumWindows**：QEMU 窗口句柄缓存起来，每秒或失效时才重新找；
-  3. **不要每帧 delete/create canvas item**：三个圆是启动时建好的，之后只
-     `coords` 移动 + `itemconfig` 改颜色/显隐，并且**状态（坐标/按键）没变就整帧跳过**，
-     因为 layered 窗口每次改动都会整窗重绘；
-- 排查用 `set DICTPEN_POINTER_DEBUG=1`，状态变化时打印窗口尺寸、指针坐标和按下状态
-  （注意：开着它每帧写日志本身也会拖慢，测流畅度时关掉）。
-
-启动后的自检（实机日志）：
+启动后自检（实机日志）：
 
 ```
 [5.978] S00touchbridge: touch device ready
@@ -521,40 +418,17 @@ tsdevice:/dev/input/by-path/axs_ts open success!
 winInputLoop open tp success!
 ```
 
-点击时 app 会走到 `FBNativeWindow::inputTouchEvent`：UI 尚未初始化完会打
-`_isValidTouchEvent:0 nothing to do!`，之后就静默进入正常派发路径
-（`grep -c inputTouchEvent` 可以用来确认"事件确实送到了 app"）。
+点击时 app 会走到 `FBNativeWindow::inputTouchEvent`
+（`grep -c inputTouchEvent` 可确认事件确实送到了 app）。
 
-自动化点击：`python scripts\dpctl.py tap 280 85`——走 QMP `input-send-event`
-（`ABS_X/ABS_Y` + `BTN_LEFT`），桥再翻成 `BTN_TOUCH`。HMP 监视器只有相对位移，不能用它注入。
-
-实测（干净启动后）：`dpctl tap 280 85` 点到「开始激活」按钮，UI 跳到「配置网络」页；
-再点左上角返回箭头又回到「开始激活」。截图哈希每次都变，说明是 app 真的响应了。
-
-> `dpctl tap` 的坐标就是笔屏像素（560×170），因为 guest 的模式与 UI 逻辑尺寸一致
-> （`direction: 0`），tablet 又按显示方向报点，所以不需要再做旋转换算。
-
-#### 关于 `drmModeSetPlane failed (-13 EACCES)`
-app 日志里会**周期性**出现（例如某次运行 13:44:27/30 连续几条），不是纯启动瞬态：
-打开 `drm.debug=0x1e` 时每次原子检查都是成功的，`debugfs dri/0/state` 也显示 plane 正常：
-
-```
-plane[31]: plane-0  crtc=crtc-0  crtc-pos=560x170+0+0
-    fb=41 (allocated by = miniapp)  format=XR24  size=560x170  pitch[0]=2240
-crtc[33]: crtc-0  enable=1 active=1 plane_mask=1
-```
-
-DRM 返回 `-EACCES` 一般表示「该平面的格式列表不含这个 fb 格式」；补丁 #3 把 app 的
-格式列表比较改成了恒等，所以它会间歇性地挑到不匹配的平面/格式。
-
-> 换成 bochs-display 之后，这一轮启动日志里 `EACCES` / `SetPlane failed` /
-> `Cannot find plane` 的出现次数都是 **0**（`plane(33)` 就是选中的平面），
-> 所以这条历史问题在当前配置下没再复现。
+> `drmModeSetPlane failed (-13 EACCES)` 是 virtio-gpu 时代的历史问题（换 bochs-display 后
+> 不再复现）；根因见 [docs/插件模型.md §6](docs/插件模型.md#6-插件点④显示与输入)，
+> 排障见 `docs/疑难排查.md`。
 
 ### miniapp launcher 的开关
-app 实际上由 `S01systeminit` 里的 `guardian_run /usr/bin/runDictPen` 拉起，开机就会跑；
-initramfs 另外把 `S50launcher` 改名禁用（避免它再拉一遍/刷屏）。想手工重启 app：
-`kill -9 <miniapp pid>`（guardian 会自动重启），或 `setsid /usr/bin/runDictPen`。
+app 由 `S01systeminit` 的 `guardian_run /usr/bin/runDictPen` 拉起、开机即跑；initramfs 把
+`S50launcher` 改名禁用（避免重拉/刷屏）。手工重启 app：`kill -9 <miniapp pid>`（guardian
+会自动重启）或 `setsid /usr/bin/runDictPen`。个案见 `docs/疑难排查.md`。
 
 ## 激活与凭证恢复（license）
 
@@ -712,50 +586,10 @@ python scripts\dpctl.py up --pack a6pro
 
 ## 已知问题排查
 
-- **启动日志**：`vm/serial.log`（每次开机 chardev 重写，仅含本次引导）；QEMU 自身输出在 `vm/qemu.log`。
-- **SSH 拒绝/超时**：等 30 秒再试（dropbear 由 inittab sysinit 启动）；`dpctl wait` 会等到真正就绪。
-- **`UNPROTECTED PRIVATE KEY FILE`**：见"重建环境"第 3 步，用 `icacls` 收紧 `tools/ssh/id_devvm` 权限。
-- **adb 连不上**：先确认 VM 在跑（`dpctl status`），再 `dpctl adb`（内部会自动拉起 guest 的 `adbd` 并 connect）。
-  仍失败时看 `dpctl sh -c "cat /tmp/adbd.log"`；重启后 `/data/misc/adb/adb_keys` 会由 `dpctl` 重新预建。
-- **开机一分钟就自己关机（"低电量即将关机"）**：`/sys/class/power_supply` 是空的，电量被
-  读成 0%。由 `S00battery` 钩子修复，见"电源"；确认 `cat /sys/class/power_supply/battery/capacity`
-  是 80 而不是报错，并检查 initramfs 是否是最新构建。
-- **一直停在"开始激活"页**：`/userdata/cfg/license` 不存在（`S00license` 没跑或被
-  `--no-license` 关掉了）。见"激活与凭证恢复"。
-- **改动重启后丢了**：说明状态盘没生效。看 `vm/serial.log` 里有没有 `### state: ... ###` 与
-  `### overlay: persistent upper ... ###`；有 `state: unavailable ...` 则是格式化/挂载失败（会自动回落 tmpfs，不影响开机）。
-- **`/state` 是空目录**：`/data`、`/misc` 本身是软链（分别指向 `/userdata` 与块设备），
-  持久化落在 `/state` 与 `/userdata`，不要往软链名的目录里找。
-- **ADB 里出现重复的 `emulator-XXXX`**：说明宿主转发端口落回了 adb 的模拟器探测区间（5554–5585），本项目用 15037 已规避。
-- **窗口全黑/停在启动图**：确认用的是 bochs-display（不是 virtio-gpu），且 `/dev/fb0` 存在
-  （不存在说明模块没加载，看 serial.log 的 `mod:` 行——需要 `ttm`/`drm_ttm_helper`/
-  `drm_vram_helper`/`bochs` 全部 ok）。virtio-gpu 下看到"永远停在启动图"是预期的：
-  falcon 不做 flush，见《显示：换掉 virtio-gpu》。
-- **画面斜切/斜条**：`cfg.json` 的 `direction` 不是 0（falcon 按旋转后的跨度写），
-  或显示模式不是 560×170。
-- **`fbdev: Failed to setup generic emulation`**：说明 DRM 模块的 dumb 创建参数被改坏
-  （勿改 pitch 计算，会连 fbdev 一起挂）。
-- **模块签名被拒（Key was rejected by service）**：改过的 `.ko` 需剥离尾部签名
-  （`Module signature appended` 及其前面的 12 字节结构）。
-- **`Attempted to kill init!` 重启循环**：initramfs 的 `/init` 语法错误，
-  改后务必 `bash -n scripts/initramfs-init.sh` 再构建。
-- **点击没反应 / guest 里 `No space left on device` 且 app 服务崩溃重启**：guest 的
-  `CapFrame` / `run_input_event_monitor` 会每秒写一个崩溃日志到 `/userdisk/corefile`，
-  堆积到几万个文件（实测 27877 个 / 111MB）会把 512M 状态盘顶满，之后 guest 侧开始
-  `can't create ...: No space left on device` 并进入崩溃循环，表现为**点击完全没反应**
-  （输入子系统已经死了）。**新 initramfs 已自带 `S00corelog` 钩子**：开机时把
-  corefile 裁到最新 `DICTPEN_COREFILE_KEEP`（默认 500）个，并常驻一个 janitor 每
-  `DICTPEN_COREFILE_INTERVAL`（默认 600s）再裁一次，`DICTPEN_COREFILE=0` 可关掉。
-  万一已顶满（这是历史积压，不是新钩子的错）：`dpctl down` → `dpctl up --rescue`
-  （不启 pen 的 init，串口直接给 root shell）→ 删掉 `/userdisk/corefile/*` → 再正常
-  `dpctl up`；空间恢复后点击立刻正常。`--rescue` 也可以用来修其它坏掉的 `/userdata`
-  内容（`--rescue` 下没有 SSH/adb，只能用串口）。
-- **`dpctl tap` 无效**：先排除上一条（状态盘满 / 输入服务崩溃循环时，点击必然没反应）；
-  另外 vmgui 在前台时它一直占着 QMP，`tap` 会报连接被拒——先关掉 vmgui 窗口。
-- **PySide6 装不上 / vmgui 起不来**：PySide6 目前要求 Python < 3.15，宿主默认解释器是
-  3.15 时 `pip install PySide6` 会失败；`dpctl up` 会按 `DICTPEN_VMGUI_PYTHON` →
-  常见安装位置 → `py -3.13` 的顺序自动找带 PySide6 的解释器，找不到就回落 `-display gtk`
-  （日志里会提示）。装 Python 3.13 后 `py -3.13 -m pip install PySide6` 即可。
+按现象的完整排查手册见 [`docs/疑难排查.md`](docs/疑难排查.md)（黑屏/花屏、触摸不响应、
+联网误判、首启、激活、状态盘满、SSH/adb…）。
+
+- 启动日志在 `vm/serial.log`（每次开机重写），QEMU 自身输出在 `vm/qemu.log`。
 
 ## 版权与免责
 

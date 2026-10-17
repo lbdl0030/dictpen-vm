@@ -27,8 +27,11 @@ import tomllib
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKS_DIR = os.path.join(ROOT, "packs")
 
-# 包目录里可以进"可传播"分发包的内容（其余的是固件派生物，版权归有道，不外传）
-DISTRIBUTABLE = ("pack.toml", "README.md", "cfg.json.overrides", "touchbridge.pl")
+# 包目录里"可传播"（对外分发）的描述性文件。默认这四项 —— 其余的是固件派生物，
+# 版权归有道，不外传。包可以用 `pack.toml` 的 `[dist].include` **追加**自己要外传的
+# 解释性文件（路径相对包目录），这样就不必回来改 `scripts/package.py`。
+# 顺序纪律：`*.img` / `*.so` / `*.pem` / `id_*` 的硬拦截**优先于声明**（见 package.py）。
+DIST_DEFAULT = ("pack.toml", "README.md", "cfg.json.overrides", "touchbridge.pl")
 
 
 class PackError(Exception):
@@ -86,6 +89,10 @@ class Pack:
         # 这块盘上，盘满时 overlay 会退化成只读、所有 guest 适配全部失败。各机器的
         # /userdata 占用差别很大，所以大小该由包自己说。
         self.state_size_mb = int((data.get("state", {}) or {}).get("size_mb") or 0)
+        # 可传播清单：包自己声明"允许外传"的**包内相对路径**（见 [dist].include）。
+        # 只用于 `scripts/package.py`（打可传播代码包），不影响启动。
+        self.dist_include = [str(x).replace("\\", "/")
+                             for x in ((data.get("dist", {}) or {}).get("include") or [])]
 
     # ---- 供 dpctl 使用的派生信息 --------------------------------------- #
     def patch_sources(self):
@@ -232,6 +239,28 @@ def pick_pack(name=None):
     if len(names) == 1:
         return load_pack(names[0])
     raise PackError(f"有多个固件包，请用 --pack 指定：{', '.join(names)}")
+
+
+def dist_plan():
+    """`packs/` 下每个包的"可传播"规则：{包名: {"default": {文件名}, "paths": {包内相对路径}}}。
+
+    `scripts/package.py` 用它决定可传播代码包里带哪些包内文件：
+
+    * `default` —— 历史默认四项，按 **basename** 匹配（任意深度）；
+    * `paths`   —— 该包 `[dist].include` 声明的**包内相对路径**。
+
+    包没写 `[dist]` 时只有默认项，产物与引入本机制之前逐项一致；包读不出来
+    （pack.toml 缺失/坏掉）时也只给默认项，不额外放行任何文件。
+    """
+    plan = {}
+    for name in pack_names():
+        paths = set()
+        try:
+            paths = set(load_pack(name).dist_include)
+        except PackError:
+            pass
+        plan[name] = {"default": set(DIST_DEFAULT), "paths": paths}
+    return plan
 
 
 # --------------------------------------------------------------------------- #
