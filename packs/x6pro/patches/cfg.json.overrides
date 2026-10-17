@@ -1,0 +1,4 @@
+tp=/dev/input/by-path/axs_ts
+tp_direction=0
+tp_xoffset=0
+tp_yoffset=0

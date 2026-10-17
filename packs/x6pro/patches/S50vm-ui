@@ -1,0 +1,77 @@
+#!/bin/sh
+# x6pro UI stack: our software compositor + the firmware's own app.
+[ "$1" = start ] || exit 0
+
+LOG=/userdata/applog
+mkdir -p $LOG /userdata/cfg /userdisk/miniapp/data/mini_app/pkg /userdisk/corefile 2>/dev/null
+[ -f /userdata/cfg/debug.cfg ] || cp /etc/debug.cfg /userdata/cfg/debug.cfg 2>/dev/null
+
+# Preset mini-app packages: the app expects <pkg>/<id>/a/ with a libs/ subdir.
+if [ ! -e /userdisk/miniapp/.pkgs-installed ]; then
+    for f in /etc/miniapp/resources/presetpkgs/*.amr; do
+        [ -f "$f" ] || continue
+        id=$(basename "$f" .amr)
+        d=/userdisk/miniapp/data/mini_app/pkg/$id
+        mkdir -p "$d/a/libs"
+        unzip -o -q "$f" -d "$d/a" >/dev/null 2>&1
+    done
+    touch /userdisk/miniapp/.pkgs-installed
+fi
+
+# Desktop/home mini-app resources shipped with the pack (page bundles + images).
+# The id is the one this firmware asks for at runtime (see applog).
+if [ -f /userdata/desktop.tar ] && [ ! -e /userdisk/miniapp/.desktop-installed ]; then
+    for pid in 8001661999525016 8080222437664451 8080252464522508; do
+        D=/userdisk/miniapp/data/mini_app/pkg/$pid/a
+        mkdir -p "$D/libs"
+        tar xf /userdata/desktop.tar -C "$D"
+    done
+    touch /userdisk/miniapp/.desktop-installed
+fi
+
+# Compositor payload shipped in the pack (installed once, then reused).
+if [ ! -x /userdata/debweston/usr/bin/weston ] && [ -f /userdata/weston.tar ]; then
+    mkdir -p /userdata/debweston
+    tar xf /userdata/weston.tar -C /userdata/debweston && rm -f /userdata/weston.tar
+fi
+if [ ! -e /usr/lib/aarch64-linux-gnu/libweston-10/drm-backend.so ] && [ -d /userdata/debweston/usr/lib/aarch64-linux-gnu/libweston-10 ]; then
+    mkdir -p /usr/lib/aarch64-linux-gnu
+    cp -a /userdata/debweston/usr/lib/aarch64-linux-gnu/libweston-10 /usr/lib/aarch64-linux-gnu/
+    cp -a /userdata/debweston/usr/lib/aarch64-linux-gnu/weston /usr/lib/aarch64-linux-gnu/
+fi
+chmod -R 755 /userdata/debweston/usr/bin /userdata/debweston/usr/lib /userdata/debweston/lib 2>/dev/null
+
+export XDG_RUNTIME_DIR=/run/debweston
+mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+
+# Compositor runs with its own library set; the app must never inherit it.
+# Guard on the process, not the socket: /run is on the persistent overlay, so a
+# hard power-off leaves wayland-0 behind and the old `-S` test skipped weston
+# forever -- the app then aborted in greenui::NativeWindow::create() on every
+# restart. A stale socket cannot be connected to, so clear it before launching.
+if ! pidof weston >/dev/null 2>&1; then
+    rm -f "$XDG_RUNTIME_DIR/wayland-0" "$XDG_RUNTIME_DIR/wayland-0.lock"
+    ( LD_LIBRARY_PATH=/userdata/debweston/usr/lib/aarch64-linux-gnu:/userdata/debweston/lib/aarch64-linux-gnu \
+      exec /userdata/debweston/usr/bin/weston --backend=drm-backend.so --use-pixman \
+           --shell=kiosk-shell.so --tty=1 --socket=wayland-0 --idle-time=0 \
+           --log=$LOG/vm-weston.log ) >/dev/null 2>&1 &
+    n=0
+    while [ ! -S "$XDG_RUNTIME_DIR/wayland-0" ] && [ $n -lt 60 ]; do
+        n=$((n + 1))
+        sleep 1
+    done
+fi
+
+export WAYLAND_DISPLAY=wayland-0
+export LD_LIBRARY_PATH=/oem/YoudaoDictPen/output/libs:/etc/miniapp/jsapis:/etc/miniapp/messageknife
+cd /oem/YoudaoDictPen/output || exit 1
+
+# The firmware's own launcher exports zh_CN and supervises the app; match it.
+export LC_ALL=zh_CN.utf8
+export LANG=zh_CN.utf8
+export ALSA_LIB_ADD_GAIN=1
+/usr/bin/runSysconfigMgr >$LOG/vm-sysconfig.log 2>&1 &
+sleep 2
+setsid /usr/bin/guardian_run /usr/bin/miniapp >$LOG/vm-miniapp.log 2>&1 < /dev/null &
+echo "x6pro: compositor + firmware app launched"
+exit 0

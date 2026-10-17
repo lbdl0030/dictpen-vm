@@ -1,0 +1,2 @@
+#!/bin/sh
+printf '%s\n' RK3562_Melon_V0

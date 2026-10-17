@@ -1,0 +1,42 @@
+name = "x6pro"
+note = "X6pro (RK3562 Melon) / Linux ext4 / OS 4.3.5 / 软件合成器 —— UI + 点 + 滑动 + 联网判定 + 首启已通（点/设备形态 DEVLOG §5.6(1)，滑动 §5.8，合成器守卫 §5.6(2)，联网 §5.7，首启 §5.10）"
+version = "4.3.5"
+
+[platform]
+soc = "rk3562"
+runtime = "rockchip-linux-ext4"
+kernel = ""
+initrd = ""
+
+[image]
+rootfs = "images/system_a.img"
+boot = "images/boot_a.img"
+
+[display]
+xres = 960
+yres = 480
+rotation = 0
+bpp = 32
+
+[adapt]
+battery = true
+license = true
+ap = true
+touchbridge = "patches/touchbridge.pl"
+cfg_overlay = "patches/cfg.json.overrides"
+hooks = ["patches/prepare.sh"]
+
+[adapt.replace]
+"patches/get_pcba_version" = "/usr/bin/get_pcba_version"
+"patches/S50vm-ui" = "/etc/init.d/S50vm-ui"
+"patches/S45vm-wifi" = "/etc/init.d/S45vm-wifi"
+"patches/99-axs-ts.rules" = "/etc/udev/rules.d/99-axs-ts.rules"
+"patches/weston.ini" = "/etc/xdg/weston/weston.ini"
+"weston.tar" = "/userdata/weston.tar"
+"desktop.tar" = "/userdata/desktop.tar"
+"patches/libyocr.so" = "/oem/YoudaoDictPen/output/libs/libyocr.so"
+"patches/libYoudaoStitch.so" = "/oem/YoudaoDictPen/output/libs/libYoudaoStitch.so"
+
+[checks]
+"images/boot_a.img" = "5a1129a5bd70cf3099b793e512aabb57"
+"images/system_a.img" = "db313878a4a151e140d9be7cca287e5d"
