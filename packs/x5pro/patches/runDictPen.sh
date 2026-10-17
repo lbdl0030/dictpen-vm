@@ -7,7 +7,7 @@
 #   * 日志轮转（保留；guest 的 corelog janitor 与框架 S00corelog 负责清理）。
 APP_PATH=/oem/YoudaoDictPen/output
 cd $APP_PATH
-export LD_LIBRARY_PATH=$APP_PATH/libs:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$APP_PATH/libs:$LD_LIBRARY_PATH:/etc/miniapp/jsapis:/etc/miniapp/messageknife
 export LC_ALL='zh_CN.utf8'
 
 if [ ! -d /userdata/applog ]; then

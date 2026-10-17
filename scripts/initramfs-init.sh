@@ -14,6 +14,16 @@
 mount -t proc none /proc
 mount -t sysfs none /sys
 mount -t devtmpfs none /dev 2>/dev/null || true
+# devpts has to be mounted by us: the firmware's own userspace never allocates a
+# pseudo-terminal, so nothing in its boot mounts it, and dropbear answers every
+# login that *asks* for a tty with "PTY allocation request failed on channel 0"
+# (exit 255).  Commands run over ssh - "dpctl sh", our hooks - need no pty, so
+# only an interactive client (double-clicked ssh-vm.cmd, VSCode, Termius) shows
+# the failure, which is why it looked like the ssh setup was broken.
+# switch_root below uses `mount --move /dev`, which takes submounts with it, so
+# this survives into the real root.
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts 2>/dev/null || true
 
 echo "### dictpen-vm initramfs (kernel $(uname -r)) ###"
 

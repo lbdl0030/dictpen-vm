@@ -93,10 +93,12 @@ def framework_initrd_default():
 # --------------------------------------------------------------------------- #
 from . import rv1106_linux                                    # noqa: E402
 from . import cv18xx_linux                                    # noqa: E402
+from . import rockchip_ext4                                   # noqa: E402
 
 REGISTRY = {c.name: c for c in (rv1106_linux.Rv1106LinuxRuntime,
                                 cv18xx_linux.Cv18xxLinuxRuntime,
-                                cv18xx_linux.Cv18xxLinuxErofsRuntime)}
+                                cv18xx_linux.Cv18xxLinuxErofsRuntime,
+                                rockchip_ext4.RockchipExt4Runtime)}
 
 
 def names():

@@ -1,5 +1,5 @@
 name    = "x5pro"
-note    = "X5pro / Cherry V1 CV1826 / YoudaoOS —— UI + 触摸已通（2026-10-09，见 README §6.7）"
+note    = "X5pro / Cherry V1 CV1826 / YoudaoOS —— UI + 触摸 + 卡片导航已通（触摸 2026-10-09 README §6.7，卡片崩溃 2026-10-16 README §10）"
 
 [platform]
 soc     = "cv1826"
@@ -52,6 +52,10 @@ extra       = ["patches/perl-tree",            # fixup 素材：Debian armhf per
 # 运行期 dlopen("libyocr.so") 与 libYoudaoStitch 深层符号两条路，所以用"在但不
 # 工作"的桩库整体替换（init/open/create 类返回 -1，其余 0，构造器中和），
 # DT_NEEDED / dlopen / 深层符号全部自然解析，presetpkgs 无需改动。
+# 注意：桩库里必须**保留** libstdc++ 的弱定义符号实现（std::*/__gnu_cxx::/
+# new/delete/__cxa_/_Unwind_），否则全进程的 unordered_map<string,string>
+# ::operator[] 会变成"永远返回 0"，点首页卡片必崩 —— 这两份 .so 已用
+# patches/fix-stub-cxxrt.py 从原始库回填（README §10，别用旧桩覆盖回来）。
 "patches/libyocr.so"           = "/oem/YoudaoDictPen/output/libs/libyocr.so"
 "patches/libYoudaoStitch.so"   = "/oem/YoudaoDictPen/output/libs/libYoudaoStitch.so"
 

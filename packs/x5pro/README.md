@@ -4,10 +4,11 @@ X5pro（板型 **Cherry_Cvitek_1826_V1_5G**，Cvitek **CV1826** 平台，rootfs 
 **ext4**，用户态 32 位 armhf）的固件包。与 s6pro/s7pro 同族，boot 镜像是 FIT
 （cvitek 内核 + 4 块板级 DTB），仅作参数参考。
 
-**现状（2026-10-06）：除触摸 UI 响应外全部就绪。** 引导、桌面 UI 上屏
+**现状（2026-10-16）：触摸已通，点卡片崩溃已修。** 引导、桌面 UI 上屏
 （800×254 三卡片）、SSH、静音、磁盘治理、假电量、激活、热点均验证通过；
-触摸事件已逐层送达 app（见 §6），但 3.4.6 版 app 的 UI 对其无响应 ——
-完整取证留在本文，待逆向 app 输入派发后收尾。
+触摸事件已逐层送达 app 并正确派发（见 §6.7）。点中卡片后 miniapp SEGV 的
+问题**与摄像头/麦克风无关**，真因是本包的 OCR 桩库把 libstdc++ 的弱定义符号
+一起抹成了 `return 0`（见 §10，已修）。
 
 - [1. 文件来源](#1-文件来源)
 - [2. 能力现状](#2-能力现状)
@@ -17,6 +18,8 @@ X5pro（板型 **Cherry_Cvitek_1826_V1_5G**，Cvitek **CV1826** 平台，rootfs 
 - [6. 触摸：事件全通、UI 无响应（未解，取证完整）](#6-触摸事件全通ui-无响应未解取证完整)
 - [7. 其他适配](#7-其他适配)
 - [8. 下一步](#8-下一步)
+- [9. runDictPen.sh 的 `LD_LIBRARY_PATH` 漏了两段（2026-10-09 修复）](#9-rundictpensh-的-ld_library_path-漏了两段2026-10-09-修复)
+- [10. 点卡片崩溃的真因：桩库把 libstdc++ 的弱定义也抹了（2026-10-16 修复）](#10-点卡片崩溃的真因桩库把-libstdc-的弱定义也抹了2026-10-16-修复)
 
 ## 1. 文件来源
 
@@ -38,7 +41,8 @@ X5pro（板型 **Cherry_Cvitek_1826_V1_5G**，Cvitek **CV1826** 平台，rootfs 
 | 网络 eth0 | ✅ 原生可用（S40network/S41dhcpcd 在 VM 内核正常，**不需要** s7pro 的 S00net-up） |
 | 诊断服务静默 + applog 上限 | ✅ S50launcher 的 run_uevent_monitor/runCapFrame 等（串口刷屏与磁盘写爆源头） |
 | 电池 / 激活 / 热点 | ✅ 框架钩子 |
-| 触摸 UI 响应 | ⛔ **未通**（事件已逐层送达 app，见 §6；对 UI 零效果，原因待逆向） |
+| 触摸 UI 响应 | ✅ 已通（事件逐层送达 app，坐标正确派发，见 §6.7） |
+| 点中卡片后崩溃 | ✅ **已修**（2026-10-16，真因是桩库抹掉 libstdc++ 弱定义，见 §10） |
 | TCP adb | ⛔ 这族 adbd 是 android-tools 4.2.2，只走 USB gadget（s6pro 同款结论）；S00adbd 保留为兜底 |
 
 ## 3. 与 s6pro/s7pro 的差异与对策
@@ -47,10 +51,11 @@ X5pro（板型 **Cherry_Cvitek_1826_V1_5G**，Cvitek **CV1826** 平台，rootfs 
 |------|------|
 | 板型 Cherry V1 5G | `[adapt.replace]` 的 `get_pcba_version.sh` 报 `Cherry_Cvitek_1826_V1_5G` |
 | update_engine 会在 VM 里重启机器 | `[adapt.replace]` 换成 `noop_update_engine.sh` 空操作 |
-| OCR 依赖链（同 s7pro） | 桩化 `libyocr.so`/`libYoudaoStitch.so` 整体替换（§4） |
+| OCR 依赖链（同 s7pro） | 桩化 `libyocr.so`/`libYoudaoStitch.so` 整体替换（§4），桩化时必须回填 libstdc++ 弱定义（§10） |
 | rootfs 无 dropbear、无 perl | arm64-tree + perl-tree（s7pro 同款素材） |
 | 网络 | **原生正常**（与 s7pro 不同，勿加 S00net-up） |
 | app 输入语义 | 读 `/dev/input/mouse0`（mousedev 增量）+ cfg tp 的 evdev 节点（§6） |
+| **runDictPen.sh 漏了 `LD_LIBRARY_PATH` 两段** | 已补上 `/etc/miniapp/jsapis` 和 `/etc/miniapp/messageknife`（§9） |
 
 ## 4. OCR abort：与 s7pro 同源同修
 
@@ -72,6 +77,10 @@ libyocr 初始化链要 CVITEK TPU（/dev/ion、/dev/cvi-tpu0），VM 没有。
 **DT_NEEDED / presetpkgs 均不需要改动**（依赖链自然解析到桩上）。
 
 验证：重启后日志 0 abort，miniapp 常驻，桌面渲染完整。
+
+> ⚠ 这套「全导出桩化」把 libstdc++ 的弱定义模板实例也一起抹成了 `return 0`，
+> 而这两份库正是全进程 `unordered_map<string,string>::operator[]` 的提供者
+> —— 后果是点首页卡片必崩。修法与取证见 §10（`patches/fix-stub-cxxrt.py`）。
 
 ## 5. 显示：横屏 800×254（s6pro 配方）
 
@@ -152,10 +161,26 @@ libyocr 初始化链要 CVITEK TPU（/dev/ion、/dev/cvi-tpu0），VM 没有。
 
 ## 8. 下一步
 
-1. **触摸收尾**（§6.4 两条线索，优先 falcon 的 event0 别名实验做干净）。
+1. 逐屏走查（§10 修复后卡片可进）：查词翻译 / 有道随身听这类要摄像头、麦克风的
+   功能仍未验证，缺硬件时是否优雅降级未知。**先注意**：要在这台上验证「联网类」
+   功能，别去调路由/DNS——这类固件的 `global.isOnline()` 是厂商 wifi 服务
+   （`wifi-manager` → D-Bus → JS）**推**给应用的状态，eth0 通着也可能一直显示
+   「此功能需要联网使用」。x6pro 上这条链的完整取证与解法见
+   `packs/x6pro/DEVLOG.md` §5.7（根因是缺 `/dev/bes2600` 芯片节点）。
 2. 状态盘当前 77% 占用：`[state] size_mb=2048` 已声明，旧盘跑一段时间后
    `up --fresh` 重建即可。
 3. 验证激活/账号链路（license 已写开发凭证，账号云功能依赖网络，未深测）。
+4. 给同族的桩库做同样的体检：**x6pro 已做完，结论是不用修**（2026-10-16，见
+   §10.5 与 x6pro DEVLOG §5.6(3)）；还剩 s7pro 的 `libyocr.so` /
+   `libYoudaoStitch.so`——判据不是"桩库里弱定义没了"，而是"该机有没有别的 ELF
+   UND 引用这些符号"，两步都要做（先 `stubaudit` 列被抹掉的运行期符号，再在
+   guest 侧扫 app 树的 `.dynsym` UND 表取交集）。
+5. 自研触摸桥（`patches/touchbridge.pl`）改坐标处理前先读 x6pro DEVLOG §5.8：
+   **QEMU 的 input 核心不会重发没变化的绝对轴**，所以 `BTN_LEFT` 按下/抬起那一帧
+   往往没有 ABS；桥若要求"本帧收到坐标才动手"，症状是"点能用（或点也不能用）但
+   滑动全废"。坐标要当**状态**存。另外 `dpctl tap` 发的 `BTN_TOUCH(330)` 经
+   virtio-tablet 到不了 guest，触摸语义只能由桥合成。取证用 `evtest <源节点>`
+   （不加 `--grab`，可与桥并行读）。
 
 ### 6.5 触摸深挖续（2026-10-06/07，仍未闭环）
 
@@ -294,7 +319,7 @@ dispatchTouchEvent action=2, x=205, y=129
   （它走双缓冲才上屏），已验证后恢复 true。
 - vendor busybox 无 `timeout`、PowerShell 会吃 `$()` 与管道——脚本一律写文件再执行。
 
-#### 遗留：点中卡片后 app 崩溃（与触摸无关）
+#### 遗留：点中卡片后 app 崩溃（与触摸无关）—— 2026-10-16 已修，见 §10
 
 点空白不崩；点中卡片时 **同一个触摸线程在 UP/MOVE 之后约 80ms SEGV**
 （`BottomSwipeGesture ACTION_DOWN` 在两个场景里都打，所以不是手势本身）：
@@ -308,5 +333,146 @@ Segmentation fault            <- 80ms 后，UI 已经开始执行卡片的动作
 ```
 
 即 **UI 已经把点击识别成 click 并去打开卡片对应的功能**（查词翻译 / 有道随身听），
-崩在功能内部——这台 VM 缺相应硬件（摄像头 / 麦克风），属于另一个问题，
-与触摸链路无关。app 静置 300 秒可以完全不崩。
+崩在功能内部。**本节当时归因为"缺摄像头/麦克风"，是错的**：崩溃点是埋点
+（log-spy）链路上的 `std::string::assign(this=0)`，与硬件无关，
+真因与修法见 §10。app 静置 300 秒可以完全不崩（不发埋点）。
+
+## 9. runDictPen.sh 的 `LD_LIBRARY_PATH` 漏了两段（2026-10-09 修复）
+
+**症状**：app 启动后卡住不动，或者反复重启。
+
+**根因**：本包 `patches/runDictPen.sh` 替代厂商 `/usr/bin/runDictPen` 时，把
+`LD_LIBRARY_PATH` 写成了
+
+```sh
+export LD_LIBRARY_PATH=$APP_PATH/libs:$LD_LIBRARY_PATH
+```
+
+而厂商原版是
+
+```sh
+export LD_LIBRARY_PATH=$APP_PATH/libs:$LD_LIBRARY_PATH:/etc/miniapp/jsapis:/etc/miniapp/messageknife
+```
+
+少了后两段。`/etc/miniapp/jsapis/libjsapi_export_core.so` 的 `DT_NEEDED` 里有
+`libgetdevicename.so`，而它只存在于 `/etc/miniapp/messageknife/`。uClibc 找不到它，
+`dlopen` 失败（`dlerror()` 返回的字面量就是 `File not found`），于是：
+
+```
+ERROR:File not found:dlopen in dynamic_load_jsapi   <- 格式串是 ERROR:%s:dlopen in dynamic_load_jsapi
+loadQJSModule(global) not found
+ReferenceError: could not load module filename 'global'
+  -> globalManager-*.js / dictNavgationbarManger-*.js / app.js 接连失败
+  -> eval $falcon.launchApp fail / TypeError: not a function
+  -> 框架退回启动「验证引导」(8080282888534774)，该应用在无激活状态下不画东西
+  -> 全黑
+```
+
+`dynamic_load_jsapi` 的逻辑在 `/usr/lib/libfalcon.so`（`JQuick::dynamic_load_jsapi`
+@0x4f7dc8；它先读 `cfg.json` 的 `debugger` 段，dlopen 前后各有 trace）。
+
+**对照验证**：a6pro 的核心 jsapi **不依赖** `libgetdevicename.so`，所以它的日志里
+`loadQJSModule` / `could not load module` / `launchApp fail` 都是 0 次，第二个启动的
+app 直接是 HOME（8080222437664451）。a7pro 修好后与之一致。
+
+**修复**：把那两段路径补回去（现在就是上面那一行，别删）。判断是否生效：
+
+```bat
+python scripts\dpctl.py screenshot --out vm\x.png      :: 400 字节纯黑 = 没好；~100 KB = 桌面
+python scripts\dpctl.py sh -c "grep -c 'could not load module' /userdata/applog/DictPen_*.log"
+python scripts\dpctl.py sh -c "grep -c 'launchApp fail'      /userdata/applog/DictPen_*.log"
+```
+
+**教训**：替代厂商启动脚本时，"与厂商原版一致"的那部分要逐字核对，尤其是环境变量；
+改这一行必须重新验证 UI，不能只看进程起来了。
+
+> ⚠ `packs/a7pro/patches/runDictPen.sh` 有**同样**的漏项（同一份脚本抄的），
+> 已在 a7pro 上验证并修复（见 a7pro README「黑屏的真正原因」）。
+
+## 10. 点卡片崩溃的真因：桩库把 libstdc++ 的弱定义也抹了（2026-10-16 修复）
+
+**症状**：桌面点中任意卡片 → `Navigator navToApp(...)` → 约 80 ms 后 miniapp
+SEGV（§6.7 遗留问题）。当时归因"缺摄像头/麦克风"，**是错的**：崩溃点在埋点
+（log-spy）链路上，与任何外设无关，而且**是本包自己造出来的**。
+
+### 10.1 取证（guest gdb + host ELF 解析）
+
+抓法：`gdb -batch -q -x cmd -p $(pidof miniapp)`，断点打在 packLog 里
+`bl <operator[]@plt>` 的下一条指令上，条件 `if $r0 == 0`（base 从
+`/proc/<pid>/maps` 里 libyddal_base.so 的首段地址取，偏移 0x1028cc）：
+
+```
+=== NULL-RETURN ===
+GOT 0xf38e9570 -> callee=0xf3c1a338
+0xf3c1a338 <_ZNSt8__detail9_Map_baseI...Lb1ELb0ELb1EEELb1EEixERS8_>:  mov r0, #0
+0xf3c1a33c:                                                           bx lr
+#0 YDALBASEAPI::YLogSpyEntity::packLog(unordered_map<string,string>&, const ...)   libyddal_base.so
+#1 YDALBASEAPI::YLogSpy::spyMultiple(const string&, unordered_map<string,string>&&) libyddal_base.so
+#2 YDALAPI::Internal::YLogManagerModulePrivate::logSpy(const string&, const string&) libyddal_business.so
+#3 JSLogManagerProxy::logSpy(JQFunctionCallbackInfo&)                                libjsapi_export.so
+```
+
+链路：JS 埋点 → `logSpy` → `spyMultiple` → `packLog(dst,src)` 把 src 逐项
+`dst[key] = value` 合进 dst。`dst[key]` 返回 **0**，紧接着
+`std::string::_M_assign(this=0, ...)` → `ldr r7,[r8],#8`（r8=0）→ SEGV。
+
+### 10.2 根因
+
+`_Map_base<std::string, pair<const string,string>, ...>::operator[]` 是
+**WEAK 模板实例**，libstdc++.so.6.0.22 **不导出**它（GCC6 起改成头文件内联），
+所以每个用它的库都只留 UND 引用（实测 libyddal_base 3 处、libcapt 22 处、
+libytts/libopencc/libcviruntime/libyddal_db/libfuzzy_search/libyddal_business
+各 1~4 处），全进程靠**谁先被加载谁兜底**——`libyocr.so` 里带着一份真定义
+（vaddr `0x271338`，336 字节，WEAK），而 libyocr 在符号搜索顺序里排在前面，
+于是全应用的 `unordered_map<string,string>::operator[]` 都绑到它身上。
+
+§4 的「全导出桩化」把 libyocr 的**每一个**函数体都换成了 `mov r0,#0; bx lr`
+（包括这份替别人兜底的 libstdc++ 弱定义）→ 埋点一发就崩。
+`packs/x5pro/patches/libyocr.so` 与原始库逐字节对比：大小相同、922 个代码块被改写，
+其中 382 块属于 `std::*/__gnu_cxx::/operator new/delete/__cxa_/_Unwind_` 符号。
+
+### 10.3 修法
+
+`packs/x5pro/patches/fix-stub-cxxrt.py <原始.so> <桩.so> <输出.so>`：
+只把 **.text 里属于 C++ 运行期符号**的字节从原始库回填，其余（OCR/stitch 业务
+入口、`DT_INIT` 惰性化、`DT_INIT_ARRAYSZ=0`）一概不动 —— 桩"在但不工作"的语义
+保持不变，`yocr_*` 仍返回 -1，不会再去碰 CVITEK TPU。
+
+```
+libyocr.so          回填 382 个运行期符号 / 171936 字节
+libYoudaoStitch.so  回填 166 个 / 73676 字节
+```
+
+原始库怎么拿：guest 里 overlay 的 `lowerdir=/ro` 切根后是**空目录**，看不到原文件；
+直接 `mount -o ro /dev/vda /mnt` 就是原始根（rootfs 是整盘 ext4，无分区表）。
+
+### 10.4 验证（冷重启后）
+
+```
+md5sum /oem/YoudaoDictPen/output/libs/libyocr.so   = 7ada5c9d45c72a5dde1cc0cf2d301727
+点首页卡片 → 「我的」→「我的下载」（"暂无下载内容"）两级导航正常渲染
+grep -c Segmentation /userdata/applog/DictPen_*.log = 0     （navToApp 2 次，pid 不变）
+埋点上报正常：hardware-iot.youdao.com/app/store/log/report → {"code":0,...,"msg":"OK"}
+```
+
+### 10.5 教训与同类风险
+
+- **「全导出桩化」必须跳过 C++ 运行期符号**：业务库替 libstdc++ 兜底的弱定义
+  （`_ZN?St*`、`_ZN?9__gnu_cxx*`、`_ZSt*`、new/delete、`__cxa_*`、`_Unwind_*`）
+  不是"这个库的 API"，抹掉它们等于改写了**全进程**的 STL 行为。
+- 同族用同一套桩化脚本生成的 `packs/s7pro/patches/libyocr.so`、
+  `packs/*/patches/libYoudaoStitch.so` 有**同样的隐患**（是否发作取决于那台的
+  app 版本走不走这条埋点）；复现/修复方法同上：从该机 rootfs 取原始库，跑
+  `fix-stub-cxxrt.py`。
+- **x6pro 已体检，结论是不用修**（2026-10-16，见 x6pro DEVLOG §5.6(3)）：那台的桩库
+  同样抹掉了 823 个运行期弱定义（`libyocr.so` 517 / `libYoudaoStitch.so` 348，
+  其中 849 个 rootfs 的 `libstdc++.so.6.0.29` 也不提供），但扫完该机
+  `/mnt/oem`+`/etc/miniapp`+`/usr/lib`+`/usr/bin` 全部 1159 个 ELF 的 `.dynsym`
+  UND 表，**命中 0** —— 没有别的对象依赖这些弱定义，隐患不成立。
+  判定顺序记牢：先看「有没有别的库 UND 引用」，只有引用为 0 才算安全；
+  别一看到"被抹了几百个符号"就动手回填。
+- 取证坑：`/proc/<pid>/mem` 用 perl `seek` 读 0xf3xxxxxx 会因 32 位 off_t 溢出
+  **静默失败**（读出全 0，看着像"GOT 未解析"）——读高地址一律用 gdb。
+- gdb 断点必须写 `break *0xADDR`（少星号会当成函数名，报
+  `Function "0x..." not defined`）；`commands` 里 `silent` + `detach` + `quit`
+  是 batch 模式一次性抓现场的标准写法。

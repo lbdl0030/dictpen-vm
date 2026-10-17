@@ -89,7 +89,12 @@ SYSINFO_SCRIPT = os.path.join(ROOT, "scripts", "write_system_info.sh")
 # the pen's screen.  The size is never hard-coded here: it comes from the pack.
 BTN_TOUCH = 330           # the pen UI wants a touchscreen, not a mouse click
 
-NULL = "NUL" if os.name == "nt" else "/dev/null"
+# 主机密钥记录必须是**真实文件**，不能写"空设备"：Git-Bash/MSYS 的 ssh 不认 `NUL`，
+# 会在当前工作目录建一个名叫 NUL 的真文件当 known_hosts —— 本项目就因此长期存着某个
+# 旧型号的 [127.0.0.1]:2222 密钥，换包后必刷 REMOTE HOST IDENTIFICATION HAS CHANGED，
+# 并连带禁用密码/键盘交互认证（裸 ssh、VSCode、ssh-vm.cmd 都会因此连不上）。
+# 所有包共用同一个 host:port 而每个型号一把 dropbear 密钥，所以每次 up 清空它。
+SSH_KNOWN_HOSTS = os.path.join(VM, "known_hosts_devvm")
 
 
 # --------------------------------------------------------------------------- #
@@ -162,7 +167,7 @@ def vm_running():
 def ssh_base(interactive=False):
     a = ["ssh", "-i", KEY,
          "-o", "StrictHostKeyChecking=no",
-         "-o", f"UserKnownHostsFile={NULL}",
+         "-o", f"UserKnownHostsFile={SSH_KNOWN_HOSTS}",
          "-o", "ConnectTimeout=8",
          "-p", str(SSH_PORT)]
     a += [] if interactive else ["-o", "BatchMode=yes", "-T"]
@@ -535,6 +540,10 @@ def cmd_up(args):
         return 2
 
     os.makedirs(VM, exist_ok=True)
+    # 每次启动都是一把新的主机密钥（换包 / --fresh 都会换），先把记录清空，否则
+    # StrictHostKeyChecking=no 也照样会刷 REMOTE HOST IDENTIFICATION HAS CHANGED
+    # 并连带禁用密码认证。见 SSH_KNOWN_HOSTS 的注释。
+    open(SSH_KNOWN_HOSTS, "w").close()
     base_initrd = runtime.initrd(pack)
     if not os.path.exists(base_initrd):
         print(f"dpctl: 框架缺少基础 initramfs：{base_initrd}\n"
@@ -1207,7 +1216,18 @@ def cmd_nopointer(args):
 # --------------------------------------------------------------------------- #
 def qmp_send(batches, timeout=15):
     """Open the QMP socket and run the given command dicts in order."""
-    s = socket.create_connection(("127.0.0.1", QMP_PORT), timeout=timeout)
+    try:
+        s = socket.create_connection(("127.0.0.1", QMP_PORT), timeout=timeout)
+    except (ConnectionRefusedError, TimeoutError, OSError) as e:
+        # QEMU gives a QMP chardev exactly one client, and the default
+        # `dpctl up` starts vmgui, which owns 127.0.0.1:4446 for the whole
+        # session.  A bare "WinError 10061" then reads as "the VM is down" -
+        # it is not, and `dpctl screenshot` (HMP on 4445) keeps working.
+        raise RuntimeError(
+            f"QMP tcp:{QMP_PORT} 拿不到连接（{e}）。VM 本身在跑：QEMU 的 QMP 只服务"
+            f"一个客户端，默认启动时 vmgui 已经占着它。要注入手势，请 "
+            f"`dpctl down` 后用 `dpctl up --display none`（或 --display gtk）重启。"
+        ) from e
     f = s.makefile("rwb")
     try:
         json.loads(f.readline().decode("utf-8", "replace"))   # greeting
