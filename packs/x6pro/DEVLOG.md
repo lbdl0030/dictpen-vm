@@ -364,14 +364,14 @@ mount -t devpts devpts /dev/pts 2>/dev/null || true
    35 个预设包全部装好（`packages.json` / `env.json` / 223 MB pkg 目录都在
    `/userdisk` 上），图片随包就位，首页直接完整。`desktop.tar` 从"必需"降级为"可选"。
 
-**run 1 的偶发崩溃（3 次里 1 次）**：第 1 个实例启动约 37 s 后落一个 411 KB 的 Breakpad
-dump，guardian 重启后第 2 个实例照常装包并进首页 —— **自愈，不影响结果**。日志只能
-看到崩点在按键 HAL 初始化之后，要结案得复现一次并当场用 `vm/_x6pro/gdb-abort.sh` 抓栈
-（Breakpad 的 `.dmp` 是 minidump，纯日志不足以定位）。
+**首启期间的偶发崩溃（4 次全新启动里 2 次，各 1 个 dump）**：均已定位到根因，见下面的
+「附带查清」一节 —— 自愈，不影响结果。
 
-**残留风险（不是阻塞）**：首启装完后状态盘 **318/488 MB（67%）**、剩 160 MB。
-pack.toml 没有 `[state]` 段，用的是默认 512 MB；预设包再多一点就会撞满。要留余量可加
-`[state] size_mb = 1024`（只在重建状态盘时生效）。
+**状态盘余量（本轮已处理）**：首启装完后 512 MiB 的默认盘占 **318/488 MB（67%）**，
+只剩 160 MB —— overlay 的 upper 就住在这块盘上，撞满会让整套 guest 适配退化成只读。
+已在本包 `pack.toml` 加 `[state] size_mb = 1024` 并重建验证（guest 侧 `df` 为
+974 M / 可用 640 M，即 34%）。该设置**只在创建时生效**（`up --fresh` 或删除
+`vm/state-x6pro.img` 后 `up`）。
 
 **验收命令**（首启要盯的是"进首页"而不是 pid —— pid 在中间一定会变一次）
 
@@ -385,6 +385,65 @@ python scripts\dpctl.py screenshot --out vm\x.png                               
 
 截图对照：`vm/_x6pro/fb3-home.png`（全新盘首启后的首页，三卡片图片完整）、
 `fb3-tap.png`（tap 480 240 → 规范扫描）、`fb3-back.png`（返回首页）。
+
+#### 附带查清：首启期间那个偶发崩溃（2026-10-17）
+
+上一轮记为"偶发、只看日志无法定位"。本轮用 Breakpad **minidump** 把它定位到了。
+
+取样：4 次全新启动里 **2 次**出现（每次 1 个 dump，随后自愈）；温盘启动（`up`，不带
+`--fresh`）1 次未出现。dump 在 `/userdisk/corefile/4.3.5/miniapp-*.dmp`（约 370 KB），
+宿主侧用两个纯标准库脚本解析（无需 gdb / 无需 guest）：
+
+```powershell
+python vm\_x6pro\dmpinfo.py vm\_x6pro\dumps\miniapp-*.dmp    # 流 / 模块 / 异常码 / 崩溃地址
+python vm\_x6pro\dmpctx.py  vm\_x6pro\dumps\miniapp-*.dmp    # 崩溃线程寄存器
+python vm\_x6pro\elfsym.py  vm\_x6pro\libydhal_devices.so 'fdelt|select'   # 符号与导入
+python vm\_x6pro\dis_a64.py vm\_x6pro\libydhal_devices.so 0xa394           # 定位并反汇编
+```
+
+**结论**（dump `miniapp-20261017133024.dmp`）
+
+| 项 | 值 |
+|----|-----|
+| 信号 | `SIGSEGV`（code 11） |
+| 崩溃线程 PC | `libydhal_devices.so + 0xa394` |
+| LR | 同库 `+0xa334` |
+| SP | `0x0000ffff5fffe2a0` |
+| 故障地址 | `0x0000ffff60322790` |
+| 崩溃模块 | `/usr/lib/libydhal_devices.so`（md5 `025376bef776e12aef522fd77aabecff`，223 904 B） |
+
+反汇编出的是**内联的 `FD_SET`**：
+
+```
+0xa36c  ldr x0, [sp,#0x18]      ; 取一个设备描述符
+0xa370  ldr w0, [x0,#8]         ; fd 字段
+0xa374  add w1, w0, #0x3f
+0xa37c  csel w0, w1, w0, lt     ; 有符号除法的取整修正
+0xa380  asr w0, w0, #6          ; fd >> 6        <- __FD_ELT
+0xa38c  lsl x0, x0, #3
+0xa390  add x1, sp, #0x60       ; 栈上的 fd_set
+0xa394  ldr x0, [x1, x0]        ; <<< 崩溃：越界读
+0xa39c..0xa3bc                  ; |= 1 << (fd & 0x3f); 回写
+```
+
+数值自洽：`sp+0x60 = 0xffff5fffe300`，`0x64892 × 8 = 0x324490`，相加**正好**是故障地址
+`0xffff60322790` —— 即索引 = `0x64892`，等价 fd ≈ 2 600 万。该库 `.dynsym` 里有
+`UND select`，且这段前面是 `cmp w0,#0xf` / `b.ls` 的 **16 次循环**，所以它就是
+"对 16 个设备 fd 逐个 `FD_SET` 再 `select()`" 那段。**那个 fd 是没被填过的垃圾值**
+（设备在 QEMU 里打不开，字段留着未初始化内存），`FD_SET` 直接把越界写落在栈上。
+
+**为什么间歇**：它读的是**未初始化的栈内存**，每次开机的垃圾值不同 —— 于是有的轮次
+越界到已映射的页（无事）、有的落到未映射页（SIGSEGV）。
+
+**为什么不修**：这是固件自己的 bug（`libydhal_devices.so` 里一个已 strip 的本地函数，
+偏移 +0xa394），只在设备枚举不全的环境里可达；VM 侧没有合理修法。它**自愈**：guardian
+重启后的下一个实例照常装包、进首页，代价只是那一次重启与一个 370 KB 的 dump。
+崩溃时刻的应用日志停在 `mediaPlayerService.js === MediaPlayerService onCreate` 之后，
+紧接 `YButtonEventAdapter` 那批 `config home_key_id/power_key_id/... read failed`。
+
+**可能的降噪方向（未做、未验证）**：若把该 HAL 要 open 的那 16 个节点在 VM 里补到
+"打开成功"，fd 字段就是合法值，越界写自然消失。前提是先弄清它 open 的是哪些节点
+（strace 一次 `miniapp` 的 `openat` 即可），未展开。
 
 ## 6. 复现
 

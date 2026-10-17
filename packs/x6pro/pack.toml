@@ -40,3 +40,11 @@ hooks = ["patches/prepare.sh"]
 [checks]
 "images/boot_a.img" = "5a1129a5bd70cf3099b793e512aabb57"
 "images/system_a.img" = "db313878a4a151e140d9be7cca287e5d"
+
+[state]
+# 状态盘（MiB）：overlay 的 upper 层就住在这块盘上，盘满会让 overlay 退化成只读、
+# guest 的适配（S45vm-wifi / S50vm-ui / cfg 覆盖）随之全部失效。
+# 本机首启要把 35 个预设包（165 MB 的 .amr → 223 MB 的 pkg 目录）装进 /userdisk，
+# 实测装完即占 **318/488 MB（67%）**，默认 512 MiB 只剩 160 MB 余量（DEVLOG §5.10）。
+# 加大只在创建时生效：`up --fresh`，或删掉 vm/state-x6pro.img 后再 `up`。
+size_mb = 1024
