@@ -22,8 +22,9 @@ import packlib                                                # noqa: E402
 
 # 只带这些（白名单比黑名单安全：新增大文件不会被误打进包里）
 INCLUDE_DIRS = ["scripts", "vmgui", "docs", "deps", ".trae/documents"]
-INCLUDE_FILES = ["README.md", ".gitignore", "run-vm.cmd", "stop-vm.cmd",
-                 "ssh-vm.cmd", "console.cmd", "downloads/releases.json"]
+INCLUDE_FILES = ["README.md", ".gitignore", ".gitattributes", "run-vm.cmd",
+                 "stop-vm.cmd", "ssh-vm.cmd", "console.cmd", "vm-console.cmd",
+                 "downloads/releases.json"]
 # 固件包只带"描述"，不带固件派生的二进制（那些和镜像一样归有道，且很大）。
 # 具体带哪些由**包自己**说了算：`pack.toml` 的 `[dist].include` 追加，缺省是
 # packlib.DIST_DEFAULT 那四项。见 packlib.dist_plan()。

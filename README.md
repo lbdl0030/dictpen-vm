@@ -16,6 +16,7 @@ x5pro / x6pro / x7**，覆盖 Rockchip RV1106、CVITEK CV1826、RK3562 三个平
 | [docs/固件包开发教程.md](docs/固件包开发教程.md) | 要加一台机器的人 | 三个概念、`pack.toml` 全字段、声明式/命令式适配、写 runtime、调试与检查清单 |
 | [docs/插件模型.md](docs/插件模型.md) | **要改框架 / 写插件的人** | 宿主与四个插件点、决策树、包/runtime/适配/显示接口契约、零机型自检、接口变更纪律 |
 | [docs/疑难排查.md](docs/疑难排查.md) | 卡住的人 | 按现象分类的排查：黑屏/花屏、触摸不响应、联网误判、首启、激活、SSH/adb |
+| [docs/发布说明.md](docs/发布说明.md) | 要安装/升级的人 | 当前版本更新、四步安装、镜像下载与命名、已知问题、升级说明 |
 | [.trae/documents/firmware-packs-design.md](.trae/documents/firmware-packs-design.md) | （**历史设计文档**） | 早期设计：包格式、runtime 接口、换包机制、迁移阶段与验收判据 |
 | [.trae/documents/vmgui-design.md](.trae/documents/vmgui-design.md) | 想改显示前端的人 | vmgui 的配置 schema、适配层接口、模块划分与测试计划 |
 | 本文件 | 第一次来的人 | 是什么、快速上手、能力表、`dpctl` 命令、目录结构、引导机制、换机型、分发重建 |
@@ -576,6 +577,13 @@ python scripts\dpctl.py pack import dist\a6pro.dpm --force     :: 整包装回�
 ```bat
 python scripts\package.py                     :: 看会打包哪些文件 + 自检（不写盘）
 python scripts\package.py --out dist\dictpen-vm.zip
+```
+
+`package.py` 出的是**纯代码包**（不含包内适配二进制）。发布用的整树快照另外出，
+它包含各包 `patches/` 下的适配文件，但仍不含镜像、`tools/`、`vm/` 与私钥：
+
+```bat
+git archive --format=zip -o dist\dictpen-vm-<版本>.zip HEAD
 ```
 
 自检会挡住"固件/私钥/状态盘/大文件混进包"（固件包只带 `pack.toml`/`README.md`/
