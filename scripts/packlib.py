@@ -41,12 +41,24 @@ class PackError(Exception):
 # --------------------------------------------------------------------------- #
 # 基础工具
 # --------------------------------------------------------------------------- #
+# md5 按 (路径, 大小, mtime) 记忆 —— 同一份镜像在一轮体检里要被问好几次
+# （pack_report 的 [checks] + ensure_initrd 的指纹），重算一次就是读一遍 GB。
+_MD5_CACHE: dict = {}
+
+
 def md5_of(path, chunk=1 << 20):
+    st = os.stat(path)
+    key = (os.path.abspath(path), st.st_size, st.st_mtime_ns)
+    hit = _MD5_CACHE.get(key)
+    if hit is not None:
+        return hit
     h = hashlib.md5()
     with open(path, "rb") as f:
         for block in iter(lambda: f.read(chunk), b""):
             h.update(block)
-    return h.hexdigest()
+    digest = h.hexdigest()
+    _MD5_CACHE[key] = digest
+    return digest
 
 
 def _resolve(path, base):
@@ -80,6 +92,10 @@ class Pack:
         self.initrd = _resolve(plat.get("initrd"), self.dir)
         self.xres = int(disp.get("xres") or 0)
         self.yres = int(disp.get("yres") or 0)
+        # ⚠ `[display].rotation` **仅作记录，客户端不读**（实测：帧本来就是面板方向，
+        # 见 `vm/ui-council/90-decisions.md` #56 与 `37-verify-findings.md` V1）。
+        # 保留是因为它是设备侧历史事实；但**别以为它会生效** —— 客户的 rotation 来自
+        # vmgui 的 DEFAULTS 与 profile。声明本身还同族不自洽（rv1106 三兄弟 0/270/270）。
         self.rotation = int(disp.get("rotation") or 0)
         self.bpp = int(disp.get("bpp") or 0)
         self.adapt = data.get("adapt", {})

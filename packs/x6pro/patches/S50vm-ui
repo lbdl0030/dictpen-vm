@@ -6,6 +6,30 @@ LOG=/userdata/applog
 mkdir -p $LOG /userdata/cfg /userdisk/miniapp/data/mini_app/pkg /userdisk/corefile 2>/dev/null
 [ -f /userdata/cfg/debug.cfg ] || cp /etc/debug.cfg /userdata/cfg/debug.cfg 2>/dev/null
 
+# 板型（Q89）：厂商 HAL 的 youdao_get_pcba_version() 读 /proc/device-tree/model，
+# 拿固定字符串表映射成 hal_key_config.json 的节名。QEMU 给的是 linux,dummy-virt，
+# 映射成 unkown_V? → 所有按键模块 init 失败 -14。内核不让写 model，用 bind mount
+# 换成真机名；必须在 app 起来之前生效。表里 x6pro 的原文来自 libydhal_base.so。
+MODEL='Rockchip RK3562 MELON LP4 V10 Board'
+printf '%s' "$MODEL" > /tmp/dt-model
+if [ "$(cat /proc/device-tree/model 2>/dev/null)" != "$MODEL" ]; then
+    mount --bind /tmp/dt-model /proc/device-tree/model 2>>$LOG/fake-keys.log
+fi
+
+# 实体按键（Q87/Q88/Q89）：真机是 adc-keys；VM 里没有，用 uinput 替身造出
+# /dev/input/by-path/platform-adc-keys-event —— hal_key_config.json 的
+# RK3562_Melon_V0 节按这个 by-path 名找 home/音量键。必须在 app 起来之前建好。
+if [ -x /usr/bin/perl ] && [ -f /usr/bin/fake-keys.pl ]; then
+    nohup /usr/bin/perl /usr/bin/fake-keys.pl >$LOG/fake-keys.log 2>&1 &
+fi
+# HAL 在 app 起来的那一刻就 open() 这条路径 —— 节点没建好它就连不上（实测 m_homeModule -14）。
+# 等节点真的出现再往下走，最多等 5 s。
+i=0
+while [ ! -e /dev/input/by-path/platform-adc-keys-event ] && [ $i -lt 50 ]; do
+    sleep 1; i=$((i+1))   # busybox 的 sleep 只认整数（0.1 直接报错，循环会空转）
+done
+echo "fake-keys wait: $([ -e /dev/input/by-path/platform-adc-keys-event ] && echo ready || echo MISSING) after ${i}s" >>$LOG/fake-keys.log
+
 # Preset mini-app packages: the app expects <pkg>/<id>/a/ with a libs/ subdir.
 if [ ! -e /userdisk/miniapp/.pkgs-installed ]; then
     for f in /etc/miniapp/resources/presetpkgs/*.amr; do

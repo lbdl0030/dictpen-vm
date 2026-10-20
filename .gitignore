@@ -28,6 +28,8 @@ downloads/*.img
 downloads/*.deb
 downloads/arm64/
 packs/*/images/
+# 从客机拉出来分析的预设应用包（`.amr` 同属有道派生的二进制，只做本地取证用）
+/amrs/
 # 整包快照（几百 MB ~ 1.6 GB，属于分发产物，不进版本库）
 packs/*.zip
 dist/*.zip

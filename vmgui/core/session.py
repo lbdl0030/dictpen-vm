@@ -100,6 +100,32 @@ class Session:
         if b:
             b.key(code, down, mods)
 
+    def screenshot(self, dest: str, fmt: str = "png") -> bool:
+        """请后端把当前画面落成文件（PNG 走 QMP 侧编码）。返回是否受理。
+
+        不在协议里（``FrameSource`` 只管帧），所以用 ``getattr`` 探测；结果走 ``ev.SHOT``。
+        """
+        fn = getattr(self.backend, "screenshot", None)
+        if fn is None:
+            return False
+        fn(dest, fmt)
+        return True
+
+    def force_frame(self) -> None:
+        """手动刷新钮：绕开 ``frame_poll_ms`` 的节奏，立刻抓一帧（决策 #29 / Q19）。"""
+        fn = getattr(self.backend, "force_frame", None)
+        if fn is not None:
+            fn()
+
+    def set_paused(self, paused: bool) -> None:
+        """暂停/继续取帧（`39` §2 #7：原「手动刷新」改成一颗开关）。
+
+        不在协议里（``FrameSource`` 只管帧），所以用 ``getattr`` 探测；后端不支持就静默不动。
+        """
+        fn = getattr(self.backend, "set_paused", None)
+        if fn is not None:
+            fn(paused)
+
     # ---- 内部 ---------------------------------------------------------- #
     def _on_state(self, state: str, detail: str = "") -> None:
         self.state = state

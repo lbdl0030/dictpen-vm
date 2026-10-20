@@ -10,7 +10,8 @@ from PySide6.QtCore import QPointF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
-from ..backends.base import (BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT, Frame)
+from ..backends.base import (BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT, Frame,
+                             content_rect)
 from ..input import mapper
 from . import scaling
 
@@ -40,6 +41,28 @@ class Canvas(QWidget):
     @property
     def guest_size(self) -> tuple[int, int]:
         return self._guest_size
+
+    def content_size(self) -> tuple[int, int]:
+        """裁剪后的内容尺寸 —— **面板声明是裁剪线**，不只是兜底（决策 #27 / #35）。
+
+        首帧之前还没有帧，就按声明的那块面板兜底（`32-…` §2）：这样先开出来的窗口
+        尺寸与首帧到达后**一致**，不会在首帧那一刻跳一次（那阵子用户正盯着串口看首启）。
+        """
+        crop = self.cfg.get("display.crop") or {}
+        gw, gh = self._guest_size
+        if not gw or not gh:
+            if crop.get("enabled") and int(crop.get("w") or 0) > 0 and int(crop.get("h") or 0) > 0:
+                return int(crop["w"]), int(crop["h"])
+            return 0, 0
+        cw, ch, _, _ = content_rect(crop, gw, gh)
+        return cw, ch
+
+    def oriented_size(self) -> tuple[int, int]:
+        """内容尺寸按当前旋转摆正后的宽高 —— 窗口盒子要按它算。"""
+        cw, ch = self.content_size()
+        if int(self.cfg.get("display.rotation", 0)) % 360 in (90, 270):
+            return ch, cw
+        return cw, ch
 
     @property
     def has_frame(self) -> bool:
@@ -80,9 +103,9 @@ class Canvas(QWidget):
             self.update()
 
     def sizeHint(self) -> QSize:                      # noqa: N802 (Qt 命名)
-        w, h = self._guest_size
+        w, h = self.oriented_size()
         if not w or not h:
-            return QSize(720, 400)
+            return QSize(720, 400)                    # 首帧前的兜底（32-… §2）
         z = float(self.cfg.get("display.initial_zoom", 2.0))
         return QSize(int(w * z), int(h * z))
 

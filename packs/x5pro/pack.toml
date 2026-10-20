@@ -23,7 +23,7 @@ rotation = 270
 bpp      = 32
 
 [adapt]
-hooks       = ["patches/fixup.sh"]             # 诊断服务静默、applog 上限、perl、
+hooks       = ["patches/fixup.sh", "patches/vm-keys.sh"]  # 适配钩子 + 实体键三件套
                                                # arm64 dropbear、串口 shell（见该脚本）
 touchbridge = "patches/touchbridge.pl"         # uinput 触摸桥（面板尺寸读 cfg.json
                                                # =800x254，脚本不用改）
@@ -32,7 +32,8 @@ battery     = true                             # 伪造健康电量（VM 没有 
 license     = true                             # 开机写开发凭证（框架自带脚本）
 ap          = true                             # wlan1 虚拟热点（hostapd 为 aarch64，兼容内核可跑）
 extra       = ["patches/perl-tree",            # fixup 素材：Debian armhf perl（桥运行时）
-               "patches/arm64-tree"]           # fixup 素材：arm64 strace + dropbear
+               "patches/arm64-tree",           # fixup 素材：arm64 strace + dropbear
+               "patches/vm-keys.pl", "patches/vm-keys-apply", "patches/vm-keys.env", "patches/S50vm-keys"]
                                                # （rootfs 无 dropbear；dpctl sh/put/get 走 SSH）
 # 触摸为什么必须走桥：这台 app 首选 cfg tp 的 evdev 触摸屏（真机是 I2C 触摸），
 # 桥不在时才退化到 /dev/input/mouse0（mousedev）。mousedev 的 ABS 跳变换算不可靠，

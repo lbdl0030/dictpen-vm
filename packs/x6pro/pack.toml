@@ -30,6 +30,7 @@ hooks = ["patches/prepare.sh"]
 "patches/get_pcba_version" = "/usr/bin/get_pcba_version"
 "patches/S50vm-ui" = "/etc/init.d/S50vm-ui"
 "patches/S45vm-wifi" = "/etc/init.d/S45vm-wifi"
+"patches/fake-keys.pl" = "/usr/bin/fake-keys.pl"
 "patches/99-axs-ts.rules" = "/etc/udev/rules.d/99-axs-ts.rules"
 "patches/weston.ini" = "/etc/xdg/weston/weston.ini"
 "weston.tar" = "/userdata/weston.tar"

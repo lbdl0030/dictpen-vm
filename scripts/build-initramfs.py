@@ -35,6 +35,19 @@ MODULES = [
     "ttm.ko", "drm_ttm_helper.ko", "drm_vram_helper.ko", "bochs.ko",
     # uinput: the pen UI wants a touchscreen, QEMU's mouse is not one
     "uinput.ko",
+    # 声音（可选，`dpctl up --audio` 时才真接声卡）：soundcore 打头，按依赖顺序
+    "soundcore.ko", "snd.ko", "snd-timer.ko", "snd-pcm.ko",
+    "snd-hwdep.ko",
+    # HDA 的核心在 sound/hda/（不在 pci/hda/），别按名字猜路径
+    "snd-hda-core.ko", "snd-intel-dspcfg.ko",
+    "snd-hda-codec.ko", "snd-hda-intel.ko",
+    "snd-hda-codec-generic.ko",
+    # 它挂在 ledtrig-audio 上（缺了就报 Unknown symbol ledtrig_audio_get）
+    "ledtrig-audio.ko",
+    # USB 声卡链（usb-audio 方案）：common → core → xhci → usbmidi → usb-audio
+    "usb-common.ko", "usbcore.ko", "xhci-hcd.ko", "xhci-pci.ko",
+    "mc.ko", "snd-seq-device.ko", "snd-rawmidi.ko",
+    "snd-usbmidi-lib.ko", "snd-usb-audio.ko",
     "libcrc32c.ko", "crc32c_generic.ko", "crc32c_arm64.ko", "erofs.ko",
     "overlay.ko",
     # persistent state disk (ext4) and the vfat fallback

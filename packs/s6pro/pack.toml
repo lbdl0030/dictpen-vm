@@ -50,9 +50,10 @@ license     = true                            # 开机写开发凭证（app 是�
 ap          = true                            # wlan1 上起虚拟热点 Youdao-VM
 touchbridge = "patches/touchbridge.pl"         # 触摸桥（BTN_LEFT -> BTN_TOUCH，uinput "axs_ts"）
 cfg_overlay = "patches/cfg.json.overrides"    # 只覆盖列出的 cfg.json 键
-hooks       = ["patches/fixup.sh"]            # S50launcher 恢复 / 串口 shell / dropbear / tp 链接
+hooks       = ["patches/fixup.sh", "patches/vm-keys.sh"]  # 适配钩子 + 实体键三件套
 extra       = ["patches/dropbear-tree",       # fixup 素材：Debian arm64 dropbear（原样进 /patches/dropbear-tree）
-               "patches/perl-tree"]           # fixup 素材：Debian armhf perl-base（触摸桥运行时）
+               "patches/perl-tree",          # fixup 素材：Debian armhf perl-base（触摸桥运行时）
+               "patches/vm-keys.pl", "patches/vm-keys-apply", "patches/vm-keys.env"]
 
 [adapt.replace]                     # 开机把包里的文件覆盖到 guest 根的指定位置
 # 原版从 /proc/device-tree/model 读板型；VM 里是 QEMU 的 model，所有分支都不匹配，

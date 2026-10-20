@@ -530,6 +530,78 @@ grep -E '^Event' /tmp/ev1.log
 - 从 Git Bash 模拟"干净系统 PATH"别用 `cmd //c 'set "PATH=..." && ...'`：引号会被截断，`set` 实际没生效，`D:\Git\usr\bin\ssh.exe` 照样抢在前 —— 要写成一个临时 `.cmd`（放 `vm/` 下，反正不进仓库）再跑。
 - **QEMU 的一个 QMP chardev 只服务一个客户端**：默认 `up` 会拉 vmgui，它长期占着 127.0.0.1:4446，于是 `dpctl tap` / `swipe.py` 拿到的是 `WinError 10061`（或挂到超时），而 `dpctl screenshot` 因为走 HMP 4445 一切正常 —— 极易误判成"VM 挂了/桥坏了"。注入手势前先关 vmgui（`up --display none`/`gtk`）。
 
+## 7.10 「显示偏下而且被裁」复核（2026-10-20，人点名）
+
+- **四个口径全是 960×480**：客机 `fb0/virtual_size`＝`960,480` / `U:960x480p-0`、QEMU **不裁剪**
+  的整帧（`read_ppm(screendump())`）＝960×480、`pack.toml [display]`＝960/480。
+  **上下那两条黑边不是我们裁的，是固件自己的字盒**：`cfg.json` 的
+  `screen` 写着 `width 960 / height 266 / yoffset 107`，而 `107 = (480−266)/2` —— 实测上黑边
+  112 px、下黑边 104 px，**是居中，不是偏下**（`vm/_x6_clean2.png`）。
+- **试验过"铺满"**：把 cfg 改成 `height 480 / yoffset 0` → 整屏只剩 weston 的灰底，app 不再画
+  （266 是承重的，不能这么改）。已退回并**干净重启复验**首页正常。两份脚本留在
+  `vm/_qwen_x6_cfg480.sh` / `vm/_qwen_x6_cfgrestore.sh`（改前自动备份到 `/userdata/cfg.json.bak-x6screen`）。
+- **真成立的那半条（同日再复核后修正措辞）**：首页第 3 张卡（随身听）在 x=960 处被切，而且
+  **横滑不动** —— 试过两种手势（850→250；慢速 880→120、24 步、按住 0.5 s），前后帧逐像素比对无位移
+  （只有唱针动画在动）。也就是这一行**既放不下也不能滚**；但**看得见的那一段是点得到的**：
+  `tap 830 240` 开出随身听（`vm/_x6_sweep.png`）—— 我上一版写「第三颗点不到」**说得过头了**，
+  准确说法是「点得到，但看不全」。
+  ⚠ §4 那句「三张卡片完整」与实测不符，以本条为准。
+- **映射本身没偏**：`tap 515 240` 开出的就是它下面那张卡（查词翻译 → 规范扫描页）；
+  `tap 170 240` 开出有道小P 的扫码登录页。
+
+## 7.11 实体键：Home 回桌面、音量键真改音量（2026-10-20，人点名「先做home键」）
+
+- **现象**：uinput 设备建出来了（`/dev/input/by-path/fake-keys`，名字 `adc-keys`，event3），
+  但 app 每次启动都报 `[YButtonEventAdapter] [init] m_homeModule.init failed res== -14`，
+  power/head/volumeUp/volumeDown 一样；按 102 只有 `dictpen-home` 一类日志，页面不回去。
+- **真因不在设备**：`/usr/configs/hal_key_config.json` 的 `RK3562_Melon_V0` 节写着
+  `home_key_id=platform-adc-keys-event`、`home_key_code=102`（音量 ± 同节点 115/114）。
+  HAL 再往上读 `/proc/device-tree/model` 认板型：`libydhal_base.so` 的
+  `youdao_get_pcba_version()` 拿它查一张 35 组的固定串表，QEMU 的 `linux,dummy-virt`
+  落进兜底 `unkown_V?`；`youdao_hal_config_get()` 找不到这一节，统一返回 **-14**。
+  所以改设备名、input_id、节点时序都没用 —— 缺的是板型。
+- **修法**（`patches/S50vm-ui` / `fake-keys.pl`）：
+  1. 起 app 前把 `/proc/device-tree/model` bind mount 成真机串
+     `Rockchip RK3562 MELON LP4 V10 Board`（Q88 从 4 份 DTB 读到的就是它，HAL 的表里也是它）；
+  2. `fake-keys.pl` 建两条 by-path：`platform-adc-keys-event`（HAL 用）与 `fake-keys`（调试）；
+     S50vm-ui 等前者出现再起 app。
+- **实测（冷启动两轮）**：model 正确；home/volumeUp/volumeDown 的 `init failed` 消失
+  （power 68 / head 45 是这两颗设备节点本来没造的预期值）；`echo 102 > /tmp/fake-keys.fifo`
+  → `homeCb` / `homeButtonClick`，从「查词翻译」回桌面
+  （`vm/_final_inapp.png` → `vm/_final_home.png`）。
+- **音量键**：事件到了（OSD 也弹），但 `setVolumeCallBack is_okay:-22`，日志
+  `(amixer_cset:118)snd_ctl_open error`。`hal_audio_config.json` 的 `RK3562_Melon_V0`
+  用真机的 `speaker_card_id=1` / `speaker_vol_ctl_numid=54`；VM 只有 QEMU USB Audio 的
+  card0、控件 numid=3。`prepare.sh` 只改这一节（1→0、54→3，awk 幂等），冷启动后
+  `amixer cset hw:0 numid=3 value=241 success.`，90% 正确落到 241。
+- **播放 164**：DTB 有码，但这一节的 key config 没有 `play_key`，app 只建五个模块；按下零回调。
+  控制台工具条因此只放 Home/音量－/音量＋，并且只在带 `fake-keys.pl` 的包上亮
+  （`TestConsoleKeys` 四条）。
+- **控制台入口实点**：用 Windows UI Automation 对真控制台的 `Home` / `音量＋` 按钮下发
+  `Invoke`（不是宿主合成鼠标 —— 那条进不了 app，Q78③）：guest 日志
+  `13:03:44 homeCb`、`13:03:53 setVolumeCallBack--->100 is_okay:100`，ALSA 落到 `255,255`；
+  工具条实拍 `vm/_console_keys.png`（三颗键，没有播放）。
+- **坑**：`fake-keys` 是 HAL 里的调试路径，不是 x6pro 配置里的 id；只造 `by-path/fake-keys`
+  会一直 -14。排查顺序：先 `cat /proc/device-tree/model`，再对 `hal_key_config.json` 的
+  `*_key_id`，最后才怀疑 uinput。
+- **其他机型（Q92）**：同一套 helper 已固化成每包 `vm-keys.pl` / `vm-keys-apply` /
+  `vm-keys.env`；s6pro/s7pro 在应用启动器里 apply，x5pro/a6pro/a7pro 用 `S50vm-keys`
+  等首 app 起来后延迟 apply + 重启（首次 app 必须先用 QEMU model 初始化显示，否则黑屏）；
+  x7 无键节。控制台按包 env 映射 Home 码（s6/x5=139，其余 102），音量键只有 x6pro。
+
+## 7.12 启动：55–62 s 的冷启动压到 6 s（首页快照，2026-10-20）
+
+- **测量**：`dpctl up` 4 s、SSH 33 s、首页 55–62 s；`-cpu max/a55/a72`、1/2/4 vCPU、
+  1/2G、`tb-size=1024` 都没有实质收益 —— TCG 模拟的瓶颈，不是 VM 配得高。
+- **快照**：`dpctl fast save` 把普通状态盘 `qemu-img convert` 成独立 qcow2，无音频启动到首页
+  后 `savevm ready`；`dpctl up --fast`（控制台「快速启动」）`-loadvm ready` 恢复，
+  实测 SSH 5.6 s、画面 6.2 s（约 9 倍）。`fast status` 查快照。
+- **声音**：usb-audio 不可迁移 → 快照无音频；HDA（`intel-hda+hda-duplex`）savevm 能过但
+  客机 `no soundcards`，不采用。要声音走普通「启动」冷启动。
+- **边界**：快照盘与普通状态盘独立；快照运行期改动下次快速启动丢弃；机器参数与快照不一致时
+  `up --fast` 拒绝。保存快照约 1.5–2 分钟，控制台会先要求关机并确认覆盖。
+- 台账 Q93；`vm/_bootbench.py`；控制台「快速启动/保存快照」入口。
+
 ## 8. 版权
 
 镜像版权归**网易有道**，仅供个人学习研究；包内合成器为 Debian 项目发行物（各自许可）。`weston.tar` 与 `images/` 均不进可传播代码包。

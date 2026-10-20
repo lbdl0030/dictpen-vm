@@ -42,14 +42,15 @@ rotation = 270
 [adapt]
 battery     = true                  # hal-battery 读 /sys/class/power_supply（框架假电量）
 license     = true                  # 开机写开发凭证
-ap          = false                 # 热点先不开（视觉验证用不到）
+ap          = true                  # 2026-10-18 翻开（原 false"热点先不开"）：不开则「配置网络」永远搜不到 AP。代价见本包 README §11
 touchbridge = "patches/touchbridge.pl"  # uinput 触摸桥（tslib 等 BTN_TOUCH；桥的
                                         # 面板尺寸读 cfg.json=1020x240，不用改脚本）
-hooks       = ["patches/fixup.sh"]  # 见该脚本：诊断服务静默、applog 上限、网络、
+hooks       = ["patches/fixup.sh", "patches/vm-keys.sh"]  # 适配钩子 + 实体键三件套
                                     # 串口 shell、触摸节点别名、perl、arm64 工具
 cfg_overlay = "patches/cfg.json.overrides"
 extra       = ["patches/perl-tree",         # fixup 素材：Debian armhf perl（桥运行时）
-               "patches/arm64-tree"]        # fixup 素材：arm64 strace + dropbear
+               "patches/arm64-tree",         # fixup 素材：arm64 strace + dropbear
+               "patches/vm-keys.pl", "patches/vm-keys-apply", "patches/vm-keys.env"]
 
 [adapt.replace]
 # 板型：固件原版读 /proc/device-tree/model，VM 里匹配不到任何分支

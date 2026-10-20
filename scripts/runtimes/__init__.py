@@ -34,6 +34,14 @@ class BootContext:
     initrd: str = ""
     append: str = ""
     state_img: str = ""
+    # 机器参数：留空 = 用 runtime 自己的 `default_mem` / `default_smp`。
+    # 值从 `vm/machine.toml`（控制台「配置」页写的）来，**下次起机**才看得到 ——
+    # QEMU 的 `-m` / `-smp` 是命令行参数，跑着的机器改不了。
+    mem: str = ""
+    smp: int = 0
+    # 声音：`-audiodev dsound` + intel-hda（宿主侧出声）。默认关 —— 不是每台宿主都有声卡，
+    # 打开后 guest 里还要有 snd 模块（见 build-initramfs 的 MODULES）。
+    audio: bool = False
 
 
 class Runtime:
@@ -41,6 +49,10 @@ class Runtime:
 
     name = ""
     note = ""
+
+    # 这台虚拟机默认给多少内存 / 几个 vCPU（`vm/machine.toml` 能覆盖，见 dpctl.machine_plan）
+    default_mem = "2G"
+    default_smp = 4
 
     # ---- 平台能力声明 -------------------------------------------------- #
     def validate(self, pack):
@@ -68,9 +80,10 @@ class Runtime:
 
     @staticmethod
     def drive_args(pack, state_img):
+        state_fmt = os.environ.get("DICTPEN_STATE_FMT", "raw")
         return [
             "-drive", f"file={pack.rootfs},if=virtio,format=raw,readonly=on",
-            "-drive", f"file={state_img},if=virtio,format=raw,cache=writeback",
+            "-drive", f"file={state_img},if=virtio,format={state_fmt},cache=writeback",
         ]
 
 

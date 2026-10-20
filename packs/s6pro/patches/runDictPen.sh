@@ -54,6 +54,7 @@ fi
 LOG_FILE=/userdata/applog/DictPen_`date +%Y%m%d_%H%M%S`.log
 
 # pack: switchPartition.sh 已删（见文件头注释 3），厂商版此处会调用它
+/usr/bin/vm-keys-apply   # VM 实体键：板型 + uinput 替身，必须在 miniapp 之前
 /usr/bin/miniapp > $LOG_FILE 2>&1
 
 # pack: 厂商版此处的崩溃计数 / update_engine --misc=clear / reboot 分支已删

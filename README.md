@@ -4,8 +4,9 @@
 
 **虚拟机是一个框架，固件是可拆卸的包。** 框架本身不含任何机型信息（镜像、面板尺寸、
 显示 HAL 补丁…一律没有）；一台机器的全部会变的东西放在 `packs/<名字>/` 里，启动时用
-`dpctl up --pack <名字>` 挑一个。当前唯一的包：**a6pro**（设备树代号 `Pear_RV1106`，
-Rockchip RV1106 平台，系统 **YoudaoOS 4.7.4**），见 `packs/a6pro/README.md`。
+`dpctl up --pack <名字>` 挑一个。仓库自带七个固件包：**a6pro / a7pro / s6pro / s7pro /
+x5pro / x6pro / x7**，覆盖 Rockchip RV1106、CVITEK CV1826、RK3562 三个平台；各包的
+固件版本、面板与适配边界见各自的 `packs/<名字>/README.md` 或 `DEVLOG.md`。
 
 ## 文档
 
@@ -32,11 +33,13 @@ python scripts\dpctl.py get /userdata/a.txt a.txt   :: 取文件到电脑
 python scripts\dpctl.py adb shell      :: 电脑端 adb 调试（自动 connect）
 python scripts\dpctl.py status         :: 查看 VM / 端口 / adb 状态
 python scripts\dpctl.py down           :: 关闭虚拟机
+python scripts\dpctl.py console        :: 打开词典笔控制台窗口（也可双击 vm-console.cmd）
 ```
 
 也可以继续用原始脚本：
 
 ```bat
+vm-console.cmd      :: 打开词典笔控制台（设备画面 + 状态栏 + 抽屉），等价于 dpctl console
 run-vm.cmd          :: 启动虚拟机（弹出 GTK 显示窗口，即"词典笔画面"）
 ssh-vm.cmd          :: 新开窗口，root@127.0.0.1 -p 2222 登录实机系统
 console.cmd         :: 串口控制台（看启动过程/调试，Ctrl+] 退出）
@@ -49,16 +52,20 @@ stop-vm.cmd         :: 关闭虚拟机
 
 | 能力 | 状态 |
 |------|------|
-| 实机 rootfs（EROFS）完整引导 | ✅ 主机名 `YoudaoDictionaryPen-000` |
+| 实机 rootfs（EROFS/ext4）完整引导 | ✅ 主机名 `YoudaoDictionaryPen-000` |
 | root SSH 登录（密钥认证，端口 2222） | ✅ |
 | 串口控制台（TCP 4444，可脚本化） | ✅ |
 | 可写根文件系统（overlayfs） | ✅ 改动本次运行有效 |
-| GUI 显示窗口（vmgui，默认；QEMU GTK 为回退） | ✅ 显示笔的 560×170 framebuffer，UI 直接上屏；vmgui 按取到的帧尺寸自适应分辨率与缩放（见"用 vmgui 客户端"） |
+| GUI 显示窗口（vmgui，默认；QEMU GTK 为回退） | ✅ 按包声明的面板尺寸（560×170…960×480）显示 framebuffer；vmgui 按取到的帧尺寸自适应分辨率与缩放（见"用 vmgui 客户端"） |
 | 鼠标 = 触摸（点击 QEMU 窗口驱动笔的 UI） | ✅ uinput 触摸桥 + BTN_TOUCH，见"触控"一节 |
 | 键盘/鼠标输入设备 | ✅ virtio-keyboard/tablet 已接入 |
+| 词典笔控制台（`dpctl console`） | ✅ 设备画面 + 状态栏 + 抽屉（串口 / guest 应用 / 命令 / 文件 / 配置 / 蓝牙 / 声音）；设备下拉切换、F11 全屏、实体键与快速启动工具条 |
+| 声音输出（宿主） | ✅ QEMU usb-audio + 宿主 dsound；控制台声音页可调宿主音量；a6/a7 固件仅带 tinyalsa（`tinyplay` 需 48 kHz 立体声） |
+| 实体键（Home：6 台；音量±：仅 x6pro） | ✅ 客机内 uinput 替身 + 控制台工具条；Home 回桌面；音量改真实 ALSA（见各包 README 的实体键节、`packs/x6pro/DEVLOG.md` §7.11、台账 Q92） |
+| 快速启动（首页快照） | ✅ `dpctl fast save` 把**普通**状态盘复制成 qcow2 并在首页 savevm；`dpctl up --fast` / 控制台「快速启动」约 6 s 恢复首页。快照无音频（usb-audio 不可迁移），要声音请用普通「启动」冷启动（见台账 Q93） |
 | 持久化状态盘（`/state`、`/userdata` 重启不丢） | ✅ 第二块 virtio 盘，首次开机自动格式化 ext4 |
 | PC 端 adb 调试（`adb shell` / `push` / `pull`） | ✅ guest `adbd` 走 TCP，host 侧自动 connect |
-| 有道 UI（miniapp/falcon/Skia）渲染 | ✅ 上屏、方向正确，QEMU 窗口即笔的 560×170 原生分辨率（见"显示与输入"节） |
+| 有道 UI（miniapp/falcon/Skia）渲染 | ✅ 上屏、方向正确；窗口按包声明的面板尺寸显示（见"显示与输入"节） |
 | Wi-Fi 硬件虚拟化 | ✅ `mac80211_hwsim` 虚拟网卡（`wlan0`）+ 笔自带的 nl80211 栈（`wpa_supplicant`/`wifi-manager`）；`wlan1` 上是可扫描/可关联的虚拟热点 `Youdao-VM`，并带转发+NAT 上行（见"无线"） |
 | 蓝牙硬件虚拟化 | ⏳ `hci_uart` 挂在第二个串口，宿主 `bt-hci-emu.py` 扮演控制器；guest 内核完成初始化、BlueZ 注册并上电 `hci0`，设备发现待完善 |
 | 跳过激活（开发凭证） | ✅ `S00license` 开机写入 `/userdata/cfg/license`，app 直接进桌面（见"激活与凭证恢复"） |
@@ -72,7 +79,9 @@ stop-vm.cmd         :: 关闭虚拟机
 | 子命令 | 说明 |
 |--------|------|
 | `packs [NAME]` | 列出固件包（runtime / soc / 面板 / 镜像是否就位）；给 NAME 时打印该包解析后的全部路径、补丁列表并核对 `[checks]` 的 MD5 |
-| `up [--pack NAME] [--fresh] [--headless] [--display vmgui\|gtk\|none] [--rescue] [--dev] [--pointer\|--no-pointer] [--license\|--no-license]` | 启动 VM；**用哪个固件由 `--pack` 决定**（`packs/<名>/pack.toml`，只装了一个包时可省略）。`--fresh` 清空该包的状态盘重来，`--headless` 不开窗口；`--display` 选显示前端（默认 `vmgui`：QEMU `-display none` + 客户端走 QMP；`gtk` 回退；`none` 不要窗口）；`--rescue` 直接进串口 root shell（不启 pen 的 init，用于修坏掉的 `/userdata`）；`--dev` 保留 miniapp launcher；GTK 窗口下默认调出触控反馈指针（`--no-pointer` 关掉），默认开机尝试恢复激活凭证（`--no-license` 关掉） |
+| `up [--pack NAME] [--fresh] [--fast] [--headless] [--display vmgui\|gtk\|none] [--rescue] [--dev] [--pointer\|--no-pointer] [--license\|--no-license]` | 启动 VM；**用哪个固件由 `--pack` 决定**（`packs/<名>/pack.toml`，只装了一个包时可省略）。`--fresh` 清空该包的状态盘重来，`--headless` 不开窗口；`--display` 选显示前端（默认 `vmgui`：QEMU `-display none` + 客户端走 QMP；`gtk` 回退；`none` 不要窗口）；`--rescue` 直接进串口 root shell（不启 pen 的 init，用于修坏掉的 `/userdata`）；`--dev` 保留 miniapp launcher；GTK 窗口下默认调出触控反馈指针（`--no-pointer` 关掉），默认开机尝试恢复激活凭证（`--no-license` 关掉） |
+| `fast save [--pack NAME] [--force]` / `fast status` | 建立/查看快速启动快照：把**普通**状态盘复制到 `vm/fast-<包>.qcow2`，无音频冷启动到首页后 `savevm ready`。恢复用 `up --fast`（约 6 s；无声音）；与普通状态盘互相独立 |
+| `console [--pack NAME]` | **打开词典笔控制台窗口**（`vmgui --console`，即 `vm-console.cmd` 双击的那件事）。只负责"起进程 + 记账"：解释器由 `find_pyside_python()` 一处决定；已有一个控制台在跑（读 `vm/console.pid`）或 QMP `tcp:4446` 被别人占着时**直接拒绝**，因为 QMP 只服务一个客户端——想让控制台独占画面，用 `dpctl up --display none`。窗口起来后 stdout/stderr 落 `vm/console.out`。**关掉它只有关窗口那颗键**：`dpctl down` **故意不收控制台**（#70，管理器不该被"关机"顺手关掉），虚拟机停止后显示「虚拟机未运行」。`--pack` 只定**初始**目标，之后换台在窗口里：工具条那颗「设备 x5pro」下拉一台一行、当前那台打勾，缺少镜像的灰显不可选（#28）；虚拟机运行中选择另一台会先确认，同意后**仅关闭，不自动启动**（措辞见 `vm/ui-council/31-console-copy.md` §20）。键盘：**F11 全屏 / Esc 退出全屏**（全屏的是窗口，工具条与抽屉都还在；画面按「适合」跟着放大、不裁不拉伸），Tab 收/开抽屉；工具条另有 **快速启动 / 保存快照**：保存快照需先关机（约 1.5–2 分钟，无音频启动一次），之后「快速启动」约 6 s 恢复首页；普通「启动」仍是有声音的冷启动（见台账 Q93）。工具条还有实体键 **Home / 音量－ / 音量＋**（按包映射 Home 码：s6/x5=139、其余=102；音量只有 x6pro；x7 无键，见台账 Q92） |
 | `pack export NAME [-o FILE]` / `pack import FILE [--force]` | 把整个固件包打成单个 `.dpm`（tar.gz）带走 / 装回来 |
 | `down` / `status` | 关闭 / 查看状态（即使 VM 是 `run-vm.cmd` 起的也能识别） |
 | `wait [--timeout N] [--adb]` | 等实机 shell 就绪；`--adb` 同时拉起并等待 adb |
@@ -248,7 +257,7 @@ python scripts\dpctl.py sh -c "cat /sys/class/power_supply/battery/capacity"
 | `deps/manifest.toml` | **依赖清单**：缺什么、去哪拿、怎么校验；`scripts/bootstrap.py` 按它重建环境 |
 | `scripts/bootstrap.py` | 一条命令检查/获取依赖并构建 initramfs（新环境入口） |
 | `scripts/package.py` | 打"可传播"的包（只含代码/文档/固件包描述，自检不含固件/私钥/大文件） |
-| `run-vm.cmd` / `stop-vm.cmd` / `ssh-vm.cmd` / `console.cmd` | 一键脚本（Windows）——只做转发，QEMU 参数统一在 `dpctl.py`，两处不会漂移 |
+| `vm-console.cmd` / `run-vm.cmd` / `stop-vm.cmd` / `ssh-vm.cmd` / `console.cmd` | 一键脚本（Windows）——只做转发，QEMU 参数与解释器选择统一在 `dpctl.py`，两处不会漂移。`.cmd` 必须**纯 ASCII**（cmd.exe 按 OEM 码页读，UTF-8 中文会碎成乱码并劈断 `echo`），且 `if (…)` 块里的 `echo` **不许带括号**（`)` 会提前结束代码块，实测失败提示会在成功路径上整段印出来）。改这些文件还要**用保留字节的工具**：Git Bash 会把命令行里的 `nul` 重写成 `/dev/null`，用 heredoc 写出来的 `>nul` 落盘就不是那几个字节，cmd.exe 每跑一次多印一行"系统找不到指定的路径"；这三条由 `vmgui/tests/test_units.py` 的 `TestRootLaunchers` 钉住 |
 | `scripts/run-vm.sh` | Git Bash 版启动脚本 |
 | `tools/msys2/ucrt64/` | 便携版 QEMU 11.1.1 及全部依赖（免安装） |
 | `tools/kernel-root-gui/` | Debian `linux-image-6.1.0-50-arm64`（含 DRM/virtio-gpu/ext4 模块）——**框架自带通用内核** |

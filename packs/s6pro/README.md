@@ -118,3 +118,68 @@ pack.env。与 x5pro 包 2026-10-06 的修法相同（两台的 app 同一族输
 **验证**（`vm/s6fix-*.png`）：首页 tap (110,130) → 查词翻译页；tap (32,28) →
 关掉规范扫描浮层回到词典主页；tap (450,130) → 精确命中「键盘查词」弹出键盘
 —— 三连击全部位置正确。
+
+## 7. 「设置 → 关于」点开全黑（2026-10-20 实测并修复）
+
+**症状**（人点名：「s6pro应用功能问题，如设置关于界面缺失」）：设置能打开、列表一直翻到底都有
+「关于」这一项，**点下去整屏纯黑**，没有返回键（`dpctl tap 32 28` 无效，只能
+`miniapp_cli start 8080222437664451` 把首页拉回来）。
+
+**直接证据**（`/userdata/applog/YD_PEN_APP.log`，2026-10-20 07:35 那一枪）：
+
+```
+fpath(/etc/miniapp/resources/framework/js_modules/settings.js.bin) open failed, errno 2.
+ReferenceError: could not load module filename 'settings'
+fpath(…/framework/js_modules/SettingsManager-635b89d6.js.js.bin) open failed, errno 2.
+ReferenceError: could not load module filename 'SettingsManager-635b89d6.js'
+ReferenceError: could not load module filename 'about.js'
+console.error: cannot read property 'prototype' of undefined
+    at __loadPage (jsfm-nvue.js:5000)  at loadPage (jsfm-nvue.js:4976)
+```
+
+**根因**：状态盘里装的 设置 是 **2.1.6** —— 既不是本机固件预设的 **2.1.1**
+（`/etc/miniapp/resources/presetpkgs/8080272425914438.amr`，由 `packs/s6pro/pack.toml` 的
+`[adapt.replace]` 从 `patches/presetpkgs/` 覆盖进去，两边 md5 同为 `bda49fa6704685d302a4ac9aef671284`），
+也不是宿主 `amrs/` 里那份 **2.7.3**（`meta.otaVersion=4.7.0`，本机 OS 是 4.0.5）。2.1.6 的
+`SettingsManager-635b89d6.js.bin`（172 B 字节码）`require('settings')`，而这套包体里只有
+`services/settings.js.bin`（模块名是 `services/settings`）、native 侧只有 `libs/arm-pear/`
+（Pear＝a6pro 的板名），于是整条链断在第一个 require 上 → 页面没渲染 → 黑。
+**同款失败在 10-06 的日志里就有**，不是这一轮改出来的。
+
+**修法与复验**：就地重装本机那一份，不动 `amrs/` 里更新的 2.7.3（版本新不等于配这台）——
+
+```bat
+python scripts\dpctl.py sh -c "miniapp_cli install /etc/miniapp/resources/presetpkgs/8080272425914438.amr"
+```
+
+装完注册表回到 `version=2.1.1`，再走 下拉菜单 → 齿轮 → 翻到底 → 关于：**页面正常**
+（型号 `YDPS6-1 CHN PRO`、版本 `词典笔OS 4.0.5`，`vm/_s6_about_fixed.png`），日志零
+`could not load module`。动手前把旧包整目录备份到 `/userdata/_qwen_bak_s6_setting`（4.6 MB，要退回去就
+`cp -a` 回 `pkg/8080272425914438`）。
+
+**顺带澄清一件事：桌面上没有「设置」这张卡，不是缺文件。** 首页只有 3 张卡（查词翻译／语音助手／
+有道随身听），设置的注册项 `props.addDesktop` 是
+`{"almond": true, "apollo": false, "coco": true, "x3s": true}` —— **没有 `plum_platform` 这个键**，
+而 HOME（查词翻译）的字节码里只认 6 个板名（almond/apollo/coco/melon/plum/x3s，`pear` 等都不在表里）。
+本机自报 `get_pcba_version` = **Plum_V0**，所以按板型开关它就不该上桌面；真入口是**下拉菜单那颗齿轮**
+（实测可用：`vm/_s6_top.png` = 下拉面板与那颗齿轮，`vm/_s6_setting.png` = 设置首屏）。
+2.7.3 的 `addDesktop` 同样没有 plum —— 厂商就没给这块板开。
+
+**还没查完的（别当成已修）**：把"盘上版本"与"本机预设版本"逐条对了一遍
+（`vm/_qwen_s6_preset_audit.sh`，客机里跑；`dpctl put` 时用 `//tmp/…`，Git Bash 会把 `/tmp/` 换成
+`C:/Users/…/Temp/`），24 条里 **10 条与预设不一致**（播放器 2.0.1/2.0.0、背单词 2.1.2/2.1.1、
+应用商店、parentcontrol-service、单词本、英语同步学、跟读、下拉菜单、有道随身听、个人中心）、
+1 条预设没装（`8080212483527402` 2.0.1）、1 条装了但无预设（学习计划）。
+**"不一致"不等于坏** —— 比预设新可能是 OTA/商店来的正常升级；但这正是同一条失败链的候选面，
+逐个点开验证是下一步。而 Q70/Q71 的「应用体检」只看"文件在不在盘上"，这一轮它报的是"24 条坏 0 条"，
+**口径缺的就是"是不是本机那一份"**（已作为提案记台账 Q75）。
+
+## 13. 实体键（2026-10-20）
+
+- **能力**：Home，码 **139**（`hal_key_config.json` 的 `Cherry_Cvitek_1826_V0.home_key_id =
+  platform-gpio-keys-event`）；本包固件没有音量键项。
+- **做法**：`patches/vm-keys.pl` + `vm-keys-apply` + `vm-keys.env` + `vm-keys.sh` 钩子。
+  板型串 `Cvitek Cv1826 for Youdao Cherry V0 version`；`runDictPen.sh` 在 miniapp 之前调用
+  `vm-keys-apply`（显示初始化已完成，不能再提前到 S00/S21）。
+- **验证**：冷启动后查词翻译 → 桌面（`vm/_s6_new_after.png`）；控制台工具条只亮 Home。
+- 快速启动可选：`dpctl fast save --pack s6pro`（无音频，见 README 与台账 Q93）。

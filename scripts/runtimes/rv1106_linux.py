@@ -42,8 +42,10 @@ class Rv1106LinuxRuntime(Runtime):
 
     def platform_args(self, pack, ctx: BootContext):
         return ([
-            "-M", "virt", "-cpu", "max", "-smp", "4", "-m", "2G",
-            "-accel", "tcg,thread=multi",
+            "-M", "virt", "-cpu", os.environ.get("DICTPEN_CPU", "max"),
+            "-smp", str(ctx.smp or self.default_smp),
+            "-m", ctx.mem or self.default_mem,
+            "-accel", "tcg," + os.environ.get("DICTPEN_TCG", "thread=multi"),
             "-kernel", ctx.kernel, "-initrd", ctx.initrd, "-append", ctx.append,
         ]
             + self.drive_args(pack, ctx.state_img)

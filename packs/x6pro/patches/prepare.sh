@@ -44,3 +44,25 @@ if [ ! -e "$TARGET/userdata/.vm-seeded" ]; then
     touch "$TARGET/userdata/.vm-seeded"
 fi
 printf 'x6pro: overlay prepared; source image remains read-only\n'
+# fake-keys（Q87/Q88）：HAL 按 /usr/configs/hal_key_config.json 里的 by-path 名
+# 打开 platform-adc-keys-event；uinput 替身由 S50vm-ui 拉起
+if [ -f /patches/fake-keys.pl ]; then
+    cp -f /patches/fake-keys.pl "$TARGET/usr/bin/fake-keys.pl"
+    chmod 755 "$TARGET/usr/bin/fake-keys.pl"
+fi
+# 音量键（Q90）：真机扬声器控制是 card1/numid54；VM 的 usb-audio 是 card0/numid3。
+# 只改 RK3562_Melon_V0 这一节，别的产品节保持原样；重复执行结果不变。
+AUDIO_CFG="$TARGET/usr/configs/youdao_hal_audio_config.json"
+if [ -f "$AUDIO_CFG" ]; then
+    awk '
+    /^[[:space:]]*"RK3562_Melon_V0"[[:space:]]*:/ { insec = 1 }
+    insec && /"speaker_card_id"/ {
+        sub(/"speaker_card_id"[[:space:]]*:[[:space:]]*"[0-9]+"/, "\"speaker_card_id\":\"0\"")
+    }
+    insec && /"speaker_vol_ctl_numid"/ {
+        sub(/"speaker_vol_ctl_numid"[[:space:]]*:[[:space:]]*"[0-9]+"/, "\"speaker_vol_ctl_numid\":\"3\"")
+    }
+    insec && /^[[:space:]]*}/ { insec = 0 }
+    { print }
+    ' "$AUDIO_CFG" > "$AUDIO_CFG.vm-tmp" && mv -f "$AUDIO_CFG.vm-tmp" "$AUDIO_CFG"
+fi

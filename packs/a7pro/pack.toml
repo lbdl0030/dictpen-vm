@@ -23,6 +23,8 @@ cfg_overlay = "patches/cfg.json.overrides"     # direction=0 + bpp=32 + tp
 battery     = true                             # 伪造健康电量（VM 没有 PMIC）
 license     = true                             # 开机写开发凭证（框架自带脚本）
 ap          = true                             # wlan1 虚拟热点
+hooks       = ["patches/vm-keys.sh"]           # 实体键三件套（Model bind + uinput helper）
+extra       = ["patches/vm-keys.pl", "patches/vm-keys-apply", "patches/vm-keys.env", "patches/S50vm-keys"]
 
 [adapt.replace]                                # 覆盖 guest 文件
 "patches/runDictPen.sh" = "/usr/bin/runDictPen"   # 去掉崩溃计数 reboot（VM 无 A/B 升级）

@@ -41,3 +41,4 @@ FRAME = "frame"                # (Frame)
 RESOLUTION = "resolution"      # (w, h)
 STATE = "state"                # ("connected" | "connecting" | "disconnected", detail)
 ERROR = "error"                # (message)
+SHOT = "shot"                  # (dest, ok, error)  —— 存图（PNG 走 QMP format=png）

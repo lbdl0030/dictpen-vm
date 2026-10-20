@@ -49,3 +49,30 @@ def scale_image(img: QImage, w: int, h: int, algo: str = "nearest") -> QImage:
     if img.width() == w and img.height() == h:
         return img
     return img.scaled(w, h, Qt.IgnoreAspectRatio, _ALGO.get(algo, Qt.FastTransformation))
+
+
+# 初始缩放档的封顶：眼睛看得清，又不至于把宿主屏撑爆。
+_MAX_INITIAL_ZOOM = 3.0
+
+
+def initial_scale(fw: int, fh: int, avail_w: int, avail_h: int) -> float:
+    """首帧到达前该把窗口开多大（`32-first-frame-sizing.md` §0）。
+
+    一条数学巧合使得这里没必要新增显示模式：``fit`` 的缩放就是 ``min(W/w, H/h)``，
+    所以只要画布盒子**恰好**是 ``帧 × z``，``fit`` 渲染出来的倍率就正好等于 ``z`` ——
+    整数倍、无裁切、无意义黑边都不必额外实现，用户之后拖窗口仍然自动跟随。
+
+    ``avail_*`` 是**画布控件**的可用区（工具条 + 状态栏 + 边框要先扣掉），不是窗口外框。
+    返回的 z 直接写进 ``display.initial_zoom``（它从"机型默认"退化为"用户覆盖项"）。
+    """
+    fw, fh = int(fw), int(fh)
+    avail_w, avail_h = int(avail_w), int(avail_h)
+    if fw <= 0 or fh <= 0 or avail_w <= 0 or avail_h <= 0:
+        return 1.0
+    z_raw = min(avail_w / fw, avail_h / fh)
+    if z_raw < 1.0:                       # 宿主屏连 1× 都放不下 → 退回纯 fit
+        return z_raw
+    z = min(int(z_raw), _MAX_INITIAL_ZOOM)
+    if z < 2 and z_raw >= 1.5:            # 唯一非整数例外：别白留半屏
+        z = 1.5
+    return max(float(z), 1.0)

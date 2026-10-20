@@ -212,14 +212,79 @@ busybox 对 `dir/.` 源报 `cp: omitting directory ...`，libtomcrypt/libtommath
 
 - **OCR 不可用**（设计如此）：libyocr/libYoudaoStitch 是桩，拍题/扫描类功能不可用；
   其余功能正常。若将来要真 OCR，需要给 VM 造 /dev/ion + /dev/cvi-tpu0 的等效物。
-- **QMP abs/key 到不了 virtio-tablet**（QEMU 11.1.1）：未深挖（见 §6 遗留说明）。
-  本包不受影响；影响的是所有想绕过桥直接用裸 tablet 的方案。
+- **QMP `key` 到不了 virtio-tablet，但 `abs` 到得了**（2026-10-20 抓包更正本条旧说法）：
+  原文写的是"`abs`/`key` 都到不了"，**测错了** —— 同一台、同一条 QMP 会话，四种批次形状
+  （按下与移动同批 / 分开，各两个新位置）**4/4 都在 `/dev/input/event1` 抓到
+  `ABS_X`+`ABS_Y`+`BTN_LEFT=1`+`BTN_LEFT=0`**；只有 `key`(BTN_TOUCH=330) 那一批 event1 全空
+  （它落在 event0 键盘）。对本包无影响（桥从 event1 读 BTN_LEFT+ABS 自己换算），
+  但它把"能不能绕开桥直接用裸 tablet"这件事的判断基线挪了位置。复验：
+  `vm/_qwen_s7_btnshape.py`（A/B 四种形状对着抓包）、`vm/_qwen_s7_evprobe.py`（一次 tap 同时录
+  event1 与桥发布的 `axs_ts`，按时间戳排）。⚠ 两个脚本都要**先收掉控制台**（QMP 单客户端）。
 - **adb 未配**：rootfs 是否自带 adbd 未查；SSH/串口已覆盖调试与传文件。
-- **语音助手的「开始激活」页**：tap 进去的是语音助手 app 自己的激活页（其业务激活，
-  与设备的 S00license 开发凭证是两回事），未再往里验证。
+- **语音助手的「开始激活」页**（2026-10-18 往里验了一步，见 §11）：tap 进去的是语音助手 app
+  自己的激活页（其业务激活，与设备的 S00license 开发凭证是两回事）。整页纯黑 + 一颗按钮，
+  **没有 ×、没有返回**；`sendkey esc`/`backspace` **完全无效**（厂商应用不吃键盘）。
+  点下去进「配置网络」，那页左上角的 `<` 可以退回。
+- **`[adapt].ap` 原来是 `false`，本包是七包里唯一关掉虚拟热点的**（2026-10-18 已翻成 `true`，见 §11）。
+
+## 11. 虚拟热点 `ap`：为什么当初关、翻开之后实测差在哪（2026-10-18）
+
+`[adapt].ap` 原值 `false`，注释写"热点先不开（视觉验证用不到）"——**当年是按"只看 UI"的需求关的，
+不是因为它坏了**。这次为了走通激活流程翻开，两态对照（同一台、同一份 `state-s7pro.img`）：
+
+| 观测量 | `ap = false` | `ap = true` |
+|---|---|---|
+| `/root/.vm/ap/`（hostapd + conf + iptables + ld-linux） | 不存在 | 存在，hostapd 跑起来了 |
+| `iw wlan1 info` | `type managed`、无 ssid | `ssid Youdao-VM` |
+| `wpa_cli -i wlan0 scan_results` | **0 个 AP**（只有表头） | **能扫到 `Youdao-VM`** |
+| 「配置网络」页 | **「正在搜索网络.」永远转不完** | 应当列出该 SSID |
+
+**代价（要付的三条）**：① 起机多拉一个 aarch64 hostapd（经 `ld-linux --library-path` 起）+
+iptables/NAT 一段；② **本包所有起机时序数字都是在 `ap=false` 下量的**（框架侧控制台那批
+`33~185 s`、`UI_ATTACH_GRACE_S` 一类判据），翻开后**要重测**；③ `wlan1` 会占住 `10.201.126.0/24`。
+
+**没解决的部分（别把这条读成"激活能过了"**：`wlan0` 有 AP 可扫之后**仍停在 `wpa_state=SCANNING`、
+没 IP** —— `wifi-manager` 只扫不自动关联，**要人点那个 SSID**；再往后的业务激活还要 `sn`/`uuid`
+（`dpctl sysinfo` 要人给 `--sn --uuid`，框架不自己编；本包 `system_info.bin` 里第一个串是
+`02:00:00:00:00:00`，即 wlan0 的 MAC 全零）。**"能扫到" ≠ "能激活"，后半段仍未验证。**
 - runDictPen 替代版删除了厂商的"每次清日志"与"崩溃 5 次 reboot"分支；splash 隐藏块
   也已删除（该文件在本固件中**不存在**，find 全盘无——那块代码从第一天起就是死代码，
   当年的黑屏真因见 §4）。
+
+## 12. 「右侧画面被截、触控仍是原画面位置」—— 2026-10-20 复核：**没复现**
+
+人点名这条时先按"画面被截 → 触控跟着偏"去查，四个口径先对齐，**全都是 1020×240**：
+
+| 口径 | 取值方式 | 实测 |
+|---|---|---|
+| 客机 framebuffer | `cat /sys/class/graphics/fb0/virtual_size` / `modes` | `1020,240` / `U:1020x240p-0` |
+| app 认的屏 | `/etc/miniapp/resources/cfg.json` 的 `width/height/direction` | `1020 / 240 / 0` |
+| QEMU 扫描出来的整帧 | `dpctl` 里 `read_ppm(screendump())`（**不裁剪**，`--w/--h` 会裁） | `1020 x 240`，734400 B |
+| 包声明 | `pack.toml [display] xres/yres` | `1020 / 240` |
+
+**"右边少一块"来自固件首页自己的可横滑卡片行**：4 张卡每张 ~310 px、间距 ~5 px，整行 ~1270 > 1020，
+所以第 4 张（随身听）只露个边。**滑一下就看得到它完整的样子**（`vm/_qwen_s6_drag.py 900 120 200 120`
+→ `vm/_s7_paged.png`：滑到底第 4 张完整、再往右就是黑边，说明整行只有 4 张，不是被切掉）。
+对照：随身听自己的四宫格（听力精选/云盘社区/有道云盘/我的）在 1020 里**摆得下**（`vm/_s7_console2.png`）。
+
+**触控按"看得见的地方"命中，右侧也验了**：「配置网络」页最右那颗 Wi-Fi 开关（x≈893）
+`dpctl tap 893 122` 一次就 ON→OFF、再点一次 OFF→ON（`vm/_s7_wifi_toggle.png`）；
+桥的换算也是准的 —— tablet 收到 `ABS_X=16062/ABS_Y=16384`，桥发给 app 的是 `500/120`
+（面板 1020×240，`vm/_qwen_s7_evprobe.py` 抓的）。控制台那侧：绘制与点击逆变换用的是**同一个**
+`ViewTransform`（`vmgui/view/canvas.py:146` 画在 `t.ox/t.oy`，`window.py:2054` 用 `t` 反解），
+所以就算窗口窄到画面被裁，点下去仍跟着画面走，不会"按原画面位置"。
+
+**所以这条先记"未复现"**，不是"已修"。要复现请给**具体那一屏**：
+① 是首页还是某个 app 页；② 当时工具条「缩放」在哪一档、窗口多宽；③ 点的是哪个目标、
+落到了哪儿（有截图最好）。拿到这三条就能直接对着 evdev 抓包比，而不是猜。
+
+**同日再复核（按"在控制台里看"的方式，`vm/_s7_console.png` + `vm/_s7_sweep.png`）**：
+
+- 控制台里 **1020×240 整帧都在**，上下黑边是画布比画面高，不是裁。
+- 首页是**焦点轮播**，逐列量出来：焦点卡 **12..320（宽 308）**，其余三张 **325..553 / 558..786 /
+  791..1019（各 228）**，4 张正好铺满 1020。**AI拍照 在 558..786**（我先前把 638..951 当成了它）。
+- `tap 170 / 480 / 794` → **查词翻译 / 语音助手 / 随身听**，与画在那三个 x 上的卡一一对应 → 映射没偏。
+- 控制台点击链路：canvas 上反算 (794,120) → `session.pointer(794,120)`，一个像素不差。
 
 ## 附：本轮调试的截图索引（vm/ 下）
 
@@ -230,3 +295,14 @@ busybox 对 `dir/.` 源报 `cp: omitting directory ...`，libtomcrypt/libtommath
 | `s7-tap-final.png` | tap 第二卡片 → 语音助手「开始激活」页 |
 | `s7-clean-home.png` | 干净启动（重启后）的桌面 |
 | `s7-clean-tap.png` | 干净启动后 tap 第一卡片 → 「规范扫描」页 |
+| `_s7_act_tap.png` | 2026-10-18：「开始激活」点进去的「配置网络」页（`ap=false` 时「正在搜索网络.」永远转不完） |
+| `_s7_ap4.png` | 2026-10-18：`ap=true` 之后同一趟走查，进了「查词翻译」子页（拍照翻译/键盘查词/语音查译） |
+
+## 13. 实体键（2026-10-20）
+
+- **能力**：Home，码 **102**（`Y08_CV1813_V0.home_key_id = gpio-keys`）；本包固件没有音量键项。
+- **做法**：`patches/vm-keys.pl` + `vm-keys-apply` + `vm-keys.env` + `vm-keys.sh` 钩子；
+  板型串 `Cvitek Cv1826 for Youdao Y08 V0 version`；钩子在 `S01systeminit` 的
+  `guardian_run runDictPen` 行前插入 `vm-keys-apply`（首 app 之前、显示初始化之后）。
+- **验证**：冷启动后查词翻译 → 桌面（`vm/_s7_persist_after.png`）；控制台工具条只亮 Home。
+- 快速启动可选：`dpctl fast save --pack s7pro`（无音频，见 README 与台账 Q93）。

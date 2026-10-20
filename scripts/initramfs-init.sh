@@ -28,7 +28,7 @@ mount -t devpts devpts /dev/pts 2>/dev/null || true
 echo "### dictpen-vm initramfs (kernel $(uname -r)) ###"
 
 MODDIR=/lib/modules/$(uname -r)
-for m in virtio_ring virtio virtio_pci_modern_dev virtio_pci_legacy_dev virtio_pci virtio_blk failover net_failover virtio_net evdev uinput drm drm_kms_helper drm_shmem_helper virtio_input ttm drm_ttm_helper drm_vram_helper bochs crc32c_generic libcrc32c erofs overlay crc16 mbcache jbd2 ext4 fat nls_cp437 nls_iso8859-1 vfat virtio-rng rfkill cfg80211 libarc4 mac80211 mac80211_hwsim ecc ecdh_generic bluetooth btintel btbcm btrtl btqca hci_uart x_tables ip_tables nf_defrag_ipv4 nf_defrag_ipv6 nf_conntrack nf_nat iptable_filter iptable_nat xt_MASQUERADE; do
+for m in usb-common usbcore xhci-hcd xhci-pci mc soundcore snd snd-timer snd-pcm snd-hwdep snd-hda-core snd-intel-dspcfg snd-hda-codec snd-hda-intel ledtrig-audio snd-hda-codec-generic snd-seq-device snd-rawmidi snd-usbmidi-lib snd-usb-audio virtio_ring virtio virtio_pci_modern_dev virtio_pci_legacy_dev virtio_pci virtio_blk failover net_failover virtio_net evdev uinput drm drm_kms_helper drm_shmem_helper virtio_input ttm drm_ttm_helper drm_vram_helper bochs crc32c_generic libcrc32c erofs overlay crc16 mbcache jbd2 ext4 fat nls_cp437 nls_iso8859-1 vfat virtio-rng rfkill cfg80211 libarc4 mac80211 mac80211_hwsim ecc ecdh_generic bluetooth btintel btbcm btrtl btqca hci_uart x_tables ip_tables nf_defrag_ipv4 nf_defrag_ipv6 nf_conntrack nf_nat iptable_filter iptable_nat xt_MASQUERADE; do
     ko=$(find $MODDIR -name "$m.ko" 2>/dev/null | head -n1)
     if [ -n "$ko" ]; then
         # Module params on the kernel cmdline only work via userspace modprobe;

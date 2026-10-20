@@ -151,3 +151,31 @@ python scripts\dpctl.py tap 510 133          :: 点"查词翻译"
 - guest 自带 `/usr/bin/gdb`、`gdbserver`（调试利器）；
 - 镜像里 miniapp 日志走 zlog：WARN+ 进 syslog（`YD_PEN_APP.log`），全量 stdout 由
   runDictPen 重定向到 `DictPen_*.log`。
+
+## 显示与触控复核（2026-10-20，人点名「显示右裁＋触控有问题」）
+
+- **四个口径全是 960×266**：`fb0/virtual_size`＝`960,266` / `U:960x266p-0`、QEMU **不裁剪**整帧＝
+  960×266、`pack.toml`＝960/266、`cfg.json` 的 `screen`＝`width 960 / height 266 / direction 0 /
+  yoffset 0` → **没有字盒**（与 x6pro 不同，见 `packs/x6pro/DEVLOG.md` §7.10）。
+- **"右边被切"是首页自己的 coverflow 卡片行**：4 张卡（有道小P／查词翻译／AI拍照／随身听），
+  中间那颗被放大（当前焦点），第 4 张超出 960 被切 —— 行宽 > 屏宽是固件的排版，不是我们裁的
+  （`vm/_x7_home2.png`）。
+- **坐标投递是准的**（这条是重点）：抓桥发布的 `axs_ts`，`tap 300 60` → app 收到
+  `ABS_X=300`、`ABS_Y=60`、`BTN_TOUCH=1`、`BTN_TOUCH=0` —— 一个像素不差（`panel 960x266`、
+  `source 0..32767 -> 959 x 265` 见 `/tmp/touchbridge.log`）。
+  ⚠ **抓包必须 `bs=24`**：这台 `struct input_event` 是 **24 字节**（桥日志明写
+  `reading /dev/input/event1 (event size 24)`），用 `bs=16` 会被 evdev 直接 `EINVAL`、
+  文件 0 字节 —— 我 2026-10-20 就这么把"工具读不到"读成过"桥没转发坐标"。
+- **一处待查（别当已结）**：`tap 730 130`（对着 AI拍照）开出来的是「开始激活」页
+  （语音助手/有道小P 那一族）。既然坐标证明是准的，偏移就落在 **app 自己的命中区 vs 画出来的位置**
+  （coverflow 可能是"先聚焦再打开"）。要定它算不算缺陷，得画一张"点哪儿 → 开哪个"的对照表。
+- **顺带一条与"卡/黑屏"那一族有关的数**：这台从开机到首页出画用了 **~470 s**
+  （197 s 时整帧 0.0% 亮像素，340 s 时仍全黑）—— 不是没起（miniapp 在跑），是慢。
+
+## 实体键（2026-10-20）：无按键节
+
+- 本机固件的 `hal_key_config.json` 没有 `Y11_RV1106_V0` / `Y06_RV1106_V0` /
+  `Y24_RV1106_V0` 的按键节（只有 RK3562_* 等其它板型），按厂商 key config 这条路
+  没有可用的 Home/音量键；控制台工具条三颗键全灰，本包不安装 `vm-keys*`。
+- 若真机确实有 Home 键，需要从该机的 DTB 或其它输入服务另找路径，不能复用 s6/x5 的配方。
+- 快速启动仍可用：`dpctl fast save --pack x7`（无音频，见 README 与台账 Q93）。

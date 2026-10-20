@@ -12,6 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from ..backends.base import content_rect
+
+
+def _content_rect(guest_w: int, guest_h: int,
+                  crop: Optional[dict]) -> tuple[int, int, int, int]:
+    """裁剪后的内容尺寸与原点 —— 委托给 `backends.base.content_rect`（唯一实现，决策 #35）。"""
+    return content_rect(crop, guest_w, guest_h)
+
 
 @dataclass(frozen=True)
 class ViewTransform:
@@ -54,18 +62,6 @@ class ViewTransform:
 
 def _clamp(v: float, lo: float, hi: float) -> float:
     return lo if v < lo else (hi if v > hi else v)
-
-
-def _content_rect(guest_w: int, guest_h: int,
-                  crop: Optional[dict]) -> tuple[int, int, int, int]:
-    """裁剪后的内容尺寸与原点；裁剪越界时自动收敛。"""
-    if crop and crop.get("enabled"):
-        cx, cy = int(crop.get("x", 0)), int(crop.get("y", 0))
-        cw, ch = int(crop.get("w", 0)), int(crop.get("h", 0))
-        cw = max(1, min(cw, guest_w - cx))
-        ch = max(1, min(ch, guest_h - cy))
-        return cw, ch, max(0, cx), max(0, cy)
-    return max(1, guest_w), max(1, guest_h), 0, 0
 
 
 def build_transform(widget_w: int, widget_h: int, guest_w: int, guest_h: int, *,

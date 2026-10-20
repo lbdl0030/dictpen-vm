@@ -1,6 +1,8 @@
 """Read-only Rockchip Linux ext4 userspace on QEMU virt."""
 from __future__ import annotations
 
+import os
+
 import gzip
 from pathlib import Path
 
@@ -52,7 +54,9 @@ class RockchipExt4Runtime(Runtime):
 
     def platform_args(self, pack, ctx: BootContext):
         ctx.append += " DICTPEN_ROOTFSTYPE=ext4"
-        return (["-M", "virt", "-cpu", "max", "-smp", "4", "-m", "2G",
-                 "-accel", "tcg,thread=multi", "-kernel", ctx.kernel,
+        return (["-M", "virt", "-cpu", os.environ.get("DICTPEN_CPU", "max"),
+                "-smp", str(ctx.smp or self.default_smp),
+                "-m", ctx.mem or self.default_mem,
+                 "-accel", "tcg," + os.environ.get("DICTPEN_TCG", "thread=multi"), "-kernel", ctx.kernel,
                  "-initrd", ctx.initrd, "-append", ctx.append]
                 + self.drive_args(pack, ctx.state_img) + self.display_args(pack))

@@ -1,0 +1,34 @@
+#!/bin/sh
+# vm-keys-apply: set the board model the vendor HAL expects, then start
+# the generic uinput key helper. Called from runDictPen just before miniapp
+# (NOT at early init: the vendor display init reads the model).
+LOG=/userdata/applog
+mkdir -p "$LOG" 2>/dev/null
+[ -f /etc/vm-keys.env ] || exit 0
+. /etc/vm-keys.env
+
+if [ -p /tmp/fake-keys.fifo ] && ps | grep -q '[v]m-keys.pl'; then
+    exit 0
+fi
+
+if [ -n "$MODEL" ]; then
+    printf '%s' "$MODEL" > /tmp/dt-model
+    if [ "$(cat /proc/device-tree/model 2>/dev/null)" != "$MODEL" ]; then
+        mount --bind /tmp/dt-model /proc/device-tree/model 2>>$LOG/vm-keys.log
+    fi
+fi
+
+export VM_KEY_DEVICE VM_KEY_BYPATH VM_KEY_CODES
+if [ -x /usr/bin/perl ] && [ -f /usr/bin/vm-keys.pl ]; then
+    nohup /usr/bin/perl /usr/bin/vm-keys.pl >>$LOG/vm-keys.log 2>&1 &
+else
+    echo "vm-keys: perl or /usr/bin/vm-keys.pl missing" >>$LOG/vm-keys.log
+    exit 0
+fi
+
+i=0
+while [ ! -p /tmp/fake-keys.fifo ] && [ $i -lt 50 ]; do
+    sleep 1; i=$((i+1))
+done
+echo "vm-keys wait: $([ -p /tmp/fake-keys.fifo ] && echo ready || echo MISSING) after ${i}s" \
+    >>$LOG/vm-keys.log

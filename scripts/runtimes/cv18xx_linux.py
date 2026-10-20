@@ -21,6 +21,8 @@ Debian arm64 内核 + virt 机型**。boot 镜像只作参数参考。
 """
 from __future__ import annotations
 
+import os
+
 from . import BootContext, Runtime, framework_initrd_default, framework_kernel_default
 
 
@@ -47,8 +49,10 @@ class Cv18xxLinuxRuntime(Runtime):
         # 只读根的类型由包选的 runtime 决定：initramfs 的通用 init 按它挂 /dev/vda
         ctx.append += f" DICTPEN_ROOTFSTYPE={self.rootfstype}"
         return ([
-            "-M", "virt", "-cpu", "max", "-smp", "4", "-m", "2G",
-            "-accel", "tcg,thread=multi",
+            "-M", "virt", "-cpu", os.environ.get("DICTPEN_CPU", "max"),
+            "-smp", str(ctx.smp or self.default_smp),
+            "-m", ctx.mem or self.default_mem,
+            "-accel", "tcg," + os.environ.get("DICTPEN_TCG", "thread=multi"),
             "-kernel", ctx.kernel, "-initrd", ctx.initrd, "-append", ctx.append,
         ]
             + self.drive_args(pack, ctx.state_img)

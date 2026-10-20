@@ -48,4 +48,5 @@ fi
 LOG_FILE=/userdata/applog/DictPen_`date +%Y%m%d_%H%M%S`.log
 
 echo "before miniapp" >/dev/kmsg
+/usr/bin/vm-keys-apply   # VM 实体键：板型 + uinput 替身，必须在 miniapp 之前
 /usr/bin/miniapp > $LOG_FILE 2>&1

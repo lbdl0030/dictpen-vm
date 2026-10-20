@@ -476,3 +476,14 @@ grep -c Segmentation /userdata/applog/DictPen_*.log = 0     （navToApp 2 次，
 - gdb 断点必须写 `break *0xADDR`（少星号会当成函数名，报
   `Function "0x..." not defined`）；`commands` 里 `silent` + `detach` + `quit`
   是 batch 模式一次性抓现场的标准写法。
+
+## 11. 实体键（2026-10-20）
+
+- **能力**：Home，码 **139**（`Cherry_Cvitek_1826_V0.home_key_id =
+  platform-gpio-keys-event`）；本包固件没有音量键项。
+- **做法**：`patches/vm-keys.pl` + `vm-keys-apply` + `vm-keys.env` + `vm-keys.sh` 钩子；
+  板型串 `Cvitek Cv1826 for Youdao Cherry V0 version`。本机首次 app 启动前换 model 会黑屏，
+  因此由 `S50vm-keys` 等首 app 起来后 apply、停掉 runDictPen 守护链与 app、直接启动一个
+  miniapp（避免守护链与兜底各起一个）。
+- **验证**：冷启动后查词翻译 → 桌面（`vm/_x5_final_after.png`）；单实例；控制台只亮 Home。
+- 快速启动可选：`dpctl fast save --pack x5pro`（无音频，见 README 与台账 Q93）。

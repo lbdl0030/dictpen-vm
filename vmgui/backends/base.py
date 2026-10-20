@@ -76,3 +76,22 @@ class PointerMode:
             return PointerMode.RELATIVE
         # auto
         return PointerMode.ABSOLUTE if caps.absolute_pointer else PointerMode.RELATIVE
+
+
+def content_rect(crop, fw: int, fh: int) -> tuple[int, int, int, int]:
+    """裁剪声明 -> 内容矩形 ``(cw, ch, x0, y0)``。**唯一的实现**（决策 #35 / `33-…` §0.2）。
+
+    视图（`view/canvas.py` 的尺寸、`input/mapper.py` 的坐标变换）与后端
+    （`backends/qmp.py` 的绝对轴换算）都调这一个函数 —— 两处各写一遍公式就会在
+    ``crop.x/y > 0`` 时分叉（一边 ``max(1,…)``、一边 ``cw<=0`` 回落整帧），
+    而分叉的表现正是"点了没反应 / 右半屏失灵"。
+
+    原点约定：**恒为 0**。裁剪永远取左上角那块面板，所以负/越界一律钳回 0，
+    ``x/y`` 非 0 时按 0 处理（调用方若真需要偏移，得先在这里显式加语义）。
+    """
+    fw, fh = max(1, int(fw)), max(1, int(fh))
+    if crop and crop.get("enabled"):
+        cw, ch = int(crop.get("w") or 0), int(crop.get("h") or 0)
+        if cw > 0 and ch > 0:
+            return max(1, min(cw, fw)), max(1, min(ch, fh)), 0, 0
+    return fw, fh, 0, 0

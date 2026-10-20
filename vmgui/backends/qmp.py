@@ -23,7 +23,8 @@ from typing import Any, Optional
 
 from ..core import events as ev
 from ..core import logging as vlog
-from .base import BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT, Capabilities, Frame
+from .base import (BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT, Capabilities, Frame,
+                   content_rect)
 
 log = vlog.get("backend.qmp")
 
@@ -197,9 +198,12 @@ class QmpBackend:
         self._conn = QmpConnection(self._uri, self._timeout_ms)
         self._thread: Optional[threading.Thread] = None
         self._running = False
+        self._paused = False                             # `39` §2 #7：暂停取帧
         self._wake = threading.Event()
         self._lock = threading.Lock()
         self._queue: deque[tuple[str, tuple]] = deque()
+        self._shots: deque[tuple[str, str]] = deque()   # 存图请求（dest, fmt）
+        self._force = False                             # 手动刷新：立刻抓一帧
         self._last_frame: Optional[Frame] = None
         self._size: Optional[tuple[int, int]] = None
         self._buttons = 0
@@ -224,6 +228,9 @@ class QmpBackend:
             t.join(timeout=2.0)
         self._thread = None
         self._conn.close()
+        with self._lock:
+            self._queue.clear()
+            self._shots.clear()
         self._set_state("disconnected", "已停止")
 
     # ---- FrameSource --------------------------------------------------- #
@@ -251,6 +258,36 @@ class QmpBackend:
             self._queue.append(("key", (int(code), bool(down), int(mods))))
         self._wake.set()
 
+    def screenshot(self, dest: str, fmt: str = "png") -> None:
+        """把当前 scanout 落成文件。PNG 走 **QMP 侧**编码（实测 160 699 B，PPM 是它的
+        8.6 倍），而 PPM 是裸 RGB —— 帧循环用 PPM、存图用 PNG（决策 #17）。
+
+        必须排进后端线程的队列：QMP 连接归那个线程独有（单客户端 chardev）。
+        结果通过 ``ev.SHOT`` 广播。
+        """
+        with self._lock:
+            self._shots.append((os.path.abspath(dest), fmt))
+        self._wake.set()
+
+    def force_frame(self) -> None:
+        """手动刷新钮：**绕开** frame_poll_ms 的节奏，立刻抓一帧（决策 #29 / Q19）。
+
+        不能只是"把 poll 调快" —— 那会把 200 ms 的默认节奏一起改掉。
+        """
+        self._force = True
+        self._wake.set()
+
+    def set_paused(self, paused: bool) -> None:
+        """暂停 / 继续按节奏取帧（`39` §2 #7）。
+
+        **暂停时仍然认 `force_frame`** —— 存图与"继续时补一帧"都靠它；恢复时补一帧，
+        免得人对着旧画面等下一个 200 ms 节奏点。
+        """
+        self._paused = bool(paused)
+        if not self._paused:
+            self._force = True
+        self._wake.set()
+
     # ---- 线程主体 ------------------------------------------------------ #
     def _run(self) -> None:
         backoff = self._backoff_ms / 1000.0
@@ -265,14 +302,26 @@ class QmpBackend:
                     backoff = self._backoff_ms / 1000.0
                     self._size = None
                 self._drain_input()
+                self._drain_shots()
                 now = time.monotonic()
-                if now >= next_frame:
+                force = self._force                 # 手动刷新：不等下一个节奏点
+                self._force = False
+                # `39` §2 #7：暂停时不按节奏取帧，但**仍然认 force**（继续/存图要用）。
+                if force or (now >= next_frame and not self._paused):
                     self._grab_frame()
                     next_frame = time.monotonic() + self._poll_s
             except (QmpError, OSError) as e:
                 self._fails += 1
-                log.warning("QMP 失败(%d/%d): %s", self._fails, FAIL_THRESHOLD, e)
-                self.bus.emit(ev.ERROR, str(e))
+                # 过阈值之后分母不再有意义（旧写法会一路打 `4/3 … 11/3`，千问 Q48 顺带报的）：
+                # 头两次是"失败 n/3"，之后是"重连第 n 次"。
+                if self._fails <= FAIL_THRESHOLD:
+                    log.warning("QMP 失败(%d/%d): %s", self._fails, FAIL_THRESHOLD, e)
+                else:
+                    log.warning("QMP 重连第 %d 次: %s", self._fails - FAIL_THRESHOLD, e)
+                # `ev.ERROR` **只在首次**失败时发：否则重连期每次失败都发一条一模一样的字，
+                # UI 一旦把它写进提示行就是刷屏（同 Q48 顺带报的那半条）。
+                if self._fails == 1:
+                    self.bus.emit(ev.ERROR, str(e))
                 self._conn.close()
                 if self._fails >= FAIL_THRESHOLD:
                     self._set_state("disconnected", str(e))
@@ -302,7 +351,7 @@ class QmpBackend:
                 os.remove(self._dump)
         except OSError:
             pass
-        self._conn.execute("screendump", {"filename": self._dump})
+        self._conn.execute("screendump", {"filename": self._dump, "format": "ppm"})
         with open(self._dump, "rb") as f:
             raw = f.read()
         w, h, stride, rgb = parse_ppm(raw)
@@ -315,6 +364,28 @@ class QmpBackend:
             log.info("guest 分辨率 %dx%d", w, h)
             self.bus.emit(ev.RESOLUTION, w, h)
         self.bus.emit(ev.FRAME, frame)
+
+    # ---- 存图 ---------------------------------------------------------- #
+    def _drain_shots(self) -> None:
+        """处理排队的存图请求。单个失败只广播错误，不拖垮连接。"""
+        with self._lock:
+            if not self._shots:
+                return
+            pending = list(self._shots)
+            self._shots.clear()
+        for dest, fmt in pending:
+            try:
+                try:
+                    if os.path.exists(dest):
+                        os.remove(dest)
+                except OSError:
+                    pass
+                self._conn.execute("screendump", {"filename": dest, "format": fmt})
+            except (QmpError, OSError) as e:
+                log.warning("存图失败 %s: %s", dest, e)
+                self.bus.emit(ev.SHOT, dest, False, str(e))
+            else:
+                self.bus.emit(ev.SHOT, dest, True, "")
 
     # ---- 输入 ---------------------------------------------------------- #
     def _drain_input(self) -> None:
@@ -337,13 +408,24 @@ class QmpBackend:
         if events:
             self._conn.execute("input-send-event", {"events": events})
 
+    def _abs_rect(self, w: int, h: int) -> tuple[int, int, int, int]:
+        """绝对轴该用的内容矩形 ``(cw, ch, x0, y0)`` —— 与视图层**同一个函数**。
+
+        面板声明是**裁剪线**（决策 #27）：falcon 的 DRM mode 可能比面板宽，照帧算会把
+        面板上看不见的边也画出来 —— 而且手势会偏：画面裁了、坐标映射没裁。
+        共用 `base.content_rect` 而不是各写一遍，是因为两处公式一旦不同（一边
+        `max(1,…)`、一边 `cw<=0` 回落整帧），表现就是"点了没反应 / 右半屏失灵"（决策 #35）。
+        """
+        return content_rect(self.cfg.get("display.crop"), w, h)
+
     def _pointer_events(self, x: int, y: int, buttons: int, absolute: bool,
                         size: Optional[tuple[int, int]]) -> list[dict]:
         out: list[dict] = []
         if absolute:
             w, h = size or (1, 1)
-            ax = int(round(x * ABS_MAX / max(1, w)))
-            ay = int(round(y * ABS_MAX / max(1, h)))
+            cw, ch, cx, cy = self._abs_rect(w, h)
+            ax = int(round((x - cx) * ABS_MAX / cw))
+            ay = int(round((y - cy) * ABS_MAX / ch))
             out.append({"type": "abs", "data": {"axis": "x", "value": ax}})
             out.append({"type": "abs", "data": {"axis": "y", "value": ay}})
         else:
