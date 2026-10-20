@@ -38,6 +38,13 @@ dist/*.zip
 images/initramfs.cpio.gz
 dist/
 
+# 根目录的本机取证残留（只锚定根目录，**不误伤 packs/*/patches/*.so** —— 那是包要用的补丁库）
+# /libydhal_devices.so 是 a7pro 的**原始厂商库**（md5 1324f231…，见 packs/a7pro/README.md
+# 的"原始来源"那行），派生 .so 靠它重新生成，所以留在盘上、但不进版本库。
+/guest
+/_get_uuid.bin
+/libydhal_devices.so
+
 # Python
 __pycache__/
 *.pyc
