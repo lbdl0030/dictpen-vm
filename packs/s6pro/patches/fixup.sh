@@ -220,3 +220,31 @@ MSCALE
     chmod +x "$TARGET/etc/init.d/S00mouse-scale"
     echo "pack hook fixup: S00mouse-scale installed (PANEL=$PANEL)"
 fi
+
+# --- 10. 存储 shim / miniapp 包装器（Q105）--------------------------------------
+# [adapt.replace] 的 S00replace 只覆盖已存在目标，新增文件装不上；这里直接落盘。
+# shim 放在 /usr/lib/vmstorage/ 而不是 /usr/lib 顶层：这台 app 的加载器在找缺失库时
+# 会扫 /usr/lib 下的文件名（strace 实测它把我们的 shim 当 libresolv 候选打开），
+# 顶层放一个新的 .so 会混进它的搜索。
+# 同一份 shim 的 NMT no-op 是必需的：一旦覆盖 getStorageInfo，s6 的
+# loadNmtPatch 在 localdict 缺失时会抛 MiniNmtException，app 直接 abort。
+if [ -f /patches/libvmstorage-armhf.so ] && [ -f /patches/miniapp-wrapper.sh ]; then
+    mkdir -p "$TARGET/usr/lib/vmstorage"
+    cp -f /patches/libvmstorage-armhf.so "$TARGET/usr/lib/vmstorage/libvmstorage-armhf.so"
+    cp -f /patches/miniapp-wrapper.sh "$TARGET/usr/lib/miniapp-wrapper.sh"
+    chmod 755 "$TARGET/usr/lib/vmstorage/libvmstorage-armhf.so" \
+              "$TARGET/usr/lib/miniapp-wrapper.sh"
+    rm -f "$TARGET/usr/lib/libvmstorage-armhf.so"
+    echo "pack hook fixup: armhf storage shim installed"
+fi
+
+# --- 11. 钉住设置 2.1.1：挡掉应用商店自动升级（Q105）----------------------------
+# 2.1.6 的 SettingsManager 只 require('settings')，而本机包体只有
+# services/settings.js.bin → 存储/关于页 could not load module → 全黑（Q75 已修过一次，
+# 但联网后 app 自动升级又把它升回 2.1.6：log 里 oldVersion=2.1.1 newVersion=2.1.6）。
+# 本机固件预设是 2.1.1（/etc/miniapp/resources/presetpkgs/8080272425914438.amr），
+# 只有它与 4.0.5 的框架模块对得上。这里只挡应用商店/升级接口的域名；不影响词典。
+if [ -f "$TARGET/etc/hosts" ]; then
+    grep -q 'hardware-iot.youdao.com' "$TARGET/etc/hosts" 2>/dev/null \
+        || echo '127.0.0.1 hardware-iot.youdao.com' >> "$TARGET/etc/hosts"
+fi

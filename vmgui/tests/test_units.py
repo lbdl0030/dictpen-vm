@@ -2639,5 +2639,45 @@ class TestS7StorageShim(unittest.TestCase):
         self.assertIn("patches/miniapp-wrapper.sh", toml)
 
 
+class TestS6StorageShim(unittest.TestCase):
+    """s6pro：armhf + glibc 2.23、NMT no-op，shim 必须放 /usr/lib 子目录。"""
+
+    def _root(self):
+        return pathlib.Path(__file__).resolve().parents[2]
+
+    def test_shim_is_armhf_and_exports_storage_plus_nmt(self):
+        import struct
+        p = self._root() / "packs/s6pro/patches/libvmstorage-armhf.so"
+        b = p.read_bytes()
+        self.assertEqual(b[:4], b"\x7fELF")
+        self.assertEqual(b[4], 1, "s6 app 是 ELF32 armhf")
+        self.assertEqual(struct.unpack_from("<H", b, 0x12)[0], 40, "必须是 ARM")
+        for name in (
+                b"_ZN11YADAPTERAPI18YSystemInfoAdapter14getStorageInfoB5cxx11Ev",
+                b"_ZN11YADAPTERAPI8Internal25YSystemInfoAdapterPrivate14getStorageInfoB5cxx11Ev",
+                b"_ZN28YAsyncLocalTranslatorPrivate12loadNmtPatchEv"):
+            self.assertIn(name, b)
+        self.assertIn(b"libc.so.6", b)
+        src = (self._root() / "packs/s6pro/patches/vmstorage.c").read_text(encoding="utf-8")
+        self.assertIn('statvfs("/userdata"', src)
+        self.assertIn('\\"totalSpace\\"', src)
+
+    def test_pack_installs_outside_usr_lib_and_blocks_updates(self):
+        root = self._root()
+        fixup = (root / "packs/s6pro/patches/fixup.sh").read_text(encoding="utf-8")
+        self.assertIn("/patches/libvmstorage-armhf.so", fixup)
+        self.assertIn('"$TARGET/usr/lib/vmstorage/libvmstorage-armhf.so"', fixup)
+        self.assertIn("hardware-iot.youdao.com", fixup)
+        wrapper = (root / "packs/s6pro/patches/miniapp-wrapper.sh").read_text(encoding="utf-8")
+        self.assertIn("LD_PRELOAD=/usr/lib/vmstorage/libvmstorage-armhf.so", wrapper)
+        self.assertIn("/usr/bin/miniapp.real", wrapper)
+        run = (root / "packs/s6pro/patches/runDictPen.sh").read_text(encoding="utf-8")
+        self.assertIn("/usr/lib/miniapp-wrapper.sh", run)
+        self.assertIn("/usr/bin/miniapp.real", run)
+        toml = (root / "packs/s6pro/pack.toml").read_text(encoding="utf-8")
+        self.assertIn("patches/libvmstorage-armhf.so", toml)
+        self.assertIn("patches/miniapp-wrapper.sh", toml)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

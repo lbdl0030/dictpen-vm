@@ -53,6 +53,8 @@ yres=260`，并且 `cfg_overlay` 要**同时**覆盖 `width=640` / `height=260` 
 | 引导（ext4 root + overlay + 状态盘） | ✅ |
 | UI 上屏 | ✅ 640×260 完整正立（`vm/s6pro-landscape.png`） |
 | 触摸 | ✅ `dpctl tap 110 130` → 进「规范扫描」页（`vm/s6pro-tap.png`） |
+| 设置存储 | ✅ 跟随 VM 状态盘（shim；空间清理与关于→存储容量都显示 0.5GB/8GB，见 §14） |
+| 本地翻译（NMT） | ⛔ localdict 缺失，shim 跳过补丁加载；词典在线功能正常 |
 | adb | `S00adbd`（TCP），`dpctl adb` |
 | SSH | 不可用（无 dropbear；串口 shell 兜底） |
 | 电池 | S00battery 假电量 |
@@ -183,3 +185,51 @@ python scripts\dpctl.py sh -c "miniapp_cli install /etc/miniapp/resources/preset
   `vm-keys-apply`（显示初始化已完成，不能再提前到 S00/S21）。
 - **验证**：冷启动后查词翻译 → 桌面（`vm/_s6_new_after.png`）；控制台工具条只亮 Home。
 - 快速启动可选：`dpctl fast save --pack s6pro`（无音频，见 README 与台账 Q93）。
+
+## 14. 设置存储跟随 VM 状态盘（Q105，2026-10-21）
+
+**症状**：空间清理页显示写死的 **4.0GB/4GB**（状态盘已 8GB），扩盘不跟随。设置里
+「空间清理」「关于→存储容量」两条入口都会遇到。
+
+**根因三层**：
+1. 厂商 `getStorageInfo` 返回固定账本（totalSpace=4GB、user/available=0），盘扩了分母不动。
+2. 本机 app 是 **ELF32 armhf + glibc 2.23**（s7pro 是 2.33）。x6pro 的 AArch64 shim 不适用；
+   armhf 的 `getStorageInfo`（public/private 两个 mangled 名）同样是 **r0=sret、r1=this**，
+   24 字节 `std::string`。
+3. **NMT 连锁**：一旦覆盖存储符号，app 启动时 `loadNmtPatch` 在
+   `/userdisk/uresource/localdict` 缺失的情况下抛 `MiniNmtException` 并 abort（s6 单独跑
+   不 abort，是存储 shim 影响了这条链）。shim 里必须同时把
+   `_ZN28YAsyncLocalTranslatorPrivate12loadNmtPatchEv` 做成 no-op。
+
+**做法**：`patches/vmstorage.c` 用 Zig 编成 `libvmstorage-armhf.so`（对 s6 的 glibc 2.23
+动态链接），返回 `statvfs("/userdata")` 的 total/used/free，并带 NMT no-op。
+`miniapp-wrapper.sh` 用 `LD_PRELOAD=/usr/lib/vmstorage/libvmstorage-armhf.so` 起
+`/usr/bin/miniapp.real`；`runDictPen.sh` 在首 app 前装包装器。
+
+**两个安装坑**：
+- **不能放 `/usr/lib` 顶层**：strace 实测这台 app 的加载器在找缺失库时会把
+  `/usr/lib/libvmstorage-armhf.so` 当候选（例如 `libresolv.so.2`）打开；放子目录
+  `/usr/lib/vmstorage/` 后干净。
+- `[adapt.replace]` 只覆盖已存在目标，新增文件装不上；`fixup.sh` 第 10 节直接拷进
+  `$TARGET`。
+
+**设置版本必须钉在 2.1.1**：2.1.6 的 `SettingsManager-635b89d6.js.bin` 只
+`require('settings')`，而本机包体只有 `services/settings.js.bin` → 存储/关于页
+`could not load module` 全黑（Q75 修过一次，联网后 app 自动升级又升回 2.1.6：
+log 里 `oldVersion=2.1.1 newVersion=2.1.6`）。本机固件预设是 2.1.1，只有它与 OS 4.0.5
+的框架模块对得上。`fixup.sh` 第 11 节把 `hardware-iot.youdao.com`（应用商店/升级接口）
+指到 127.0.0.1；**已有状态盘若已经升到 2.1.6，需要手动降一次**：
+
+```bat
+python scripts\dpctl.py sh -c "miniapp_cli install /etc/miniapp/resources/presetpkgs/8080272425914438.amr"
+```
+
+**验证**（2026-10-21，8GB 状态盘、设置 2.1.1）：
+- `/proc/<miniapp.real>/maps` 命中 `/usr/lib/vmstorage/libvmstorage-armhf.so`；
+  `df /userdata` = 7.8G/452.8M 用。
+- 设置 → 空间清理：**已使用 0.5GB/8GB**（`vm/_s6_storage_shim.png`）。
+- 设置 → 关于 → 存储容量：**8GB**，点进去同样 **0.5GB/8GB**
+  （`vm/_s6_about_shim2.png`、`vm/_s6_about_storage_shim.png`）。
+- 从卡片内部上拖才滚得动设置列表（从两列之间的空隙拖会回桌面）；
+  下拉菜单 → 齿轮 才是设置入口（桌面无设置卡片）。
+- 单测：`vmgui.tests.test_units.TestS6StorageShim`。

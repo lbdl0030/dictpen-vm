@@ -62,6 +62,11 @@ extra       = ["patches/dropbear-tree",       # fixup 素材：Debian arm64 drop
 # 应用启动脚本：补 LD_LIBRARY_PATH 的 jsapi/messageknife 目录（黑屏根因，见
 # patches/runDictPen.sh 头注释），并去掉崩溃计数引发的硬重启。
 "patches/runDictPen.sh" = "/usr/bin/runDictPen"
+# 32 位存储 shim + NMT no-op（Q105）。目标是新增文件，S00replace 只覆盖已存在
+# 目标，所以这两行只用于把文件带进 initrd；真正落盘由 fixup.sh 第 10 节完成。
+# shim 放 /usr/lib/vmstorage/ 子目录：app 的加载器会扫 /usr/lib 顶层找缺失库。
+"patches/libvmstorage-armhf.so" = "/usr/lib/vmstorage/libvmstorage-armhf.so"
+"patches/miniapp-wrapper.sh"    = "/usr/lib/miniapp-wrapper.sh"
 # OCR 栈适配（见 fixup.sh 的 libyocr 注释）：VM 没有 CVITEK TPU，libyocr 的
 # 初始化路径必然 assert(0) abort；而 libyocr 又被 jsapi 库的 DT_NEEDED 拉着，
 # 直接藏掉会让 global 等 jsapi 加载失败、UI 起不来。这两份补丁版把 DT_NEEDED

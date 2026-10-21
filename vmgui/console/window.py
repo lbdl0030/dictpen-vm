@@ -1252,7 +1252,7 @@ class ConsoleWindow(QMainWindow):
                                  "扩了盘没跑 `resize2fs`。")
         v.addWidget(self.lbl_disk)
         self.lbl_disk_note = QLabel(
-            "扩容改的是 VM 状态盘；x6pro、s7pro 的设置页已通过 shim 跟随，其他机型逐步适配。")
+            "扩容改的是 VM 状态盘；x6pro、s6pro、s7pro 的设置页已通过 shim 跟随，其他机型逐步适配。")
         self.lbl_disk_note.setWordWrap(True)
         v.addWidget(self.lbl_disk_note)
         row2 = QHBoxLayout()

@@ -15,6 +15,15 @@
 #    根本起不来（S50-app-launcher 等 wait_miniapp_finish 超时后继续拉 hal 服务，
 #    表现为" hal 服务都在、UI 不在"）。A/B 槽清理在 VM 里本来就无意义。
 
+# Q105: 32-bit storage shim + NMT no-op; install the LD_PRELOAD wrapper before the app.
+if [ -f /usr/lib/miniapp-wrapper.sh ]; then
+    if [ ! -e /usr/bin/miniapp.real ]; then
+        mv /usr/bin/miniapp /usr/bin/miniapp.real
+    fi
+    cp -f /usr/lib/miniapp-wrapper.sh /usr/bin/miniapp
+    chmod 755 /usr/bin/miniapp
+fi
+
 APP_PATH=/oem/YoudaoDictPen/output
 cd $APP_PATH
 export LD_LIBRARY_PATH=$APP_PATH/libs:$LD_LIBRARY_PATH:/etc/miniapp/jsapis:/etc/miniapp/messageknife
