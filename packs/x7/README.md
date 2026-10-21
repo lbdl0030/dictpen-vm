@@ -64,7 +64,7 @@ bochs_gem_fb_create(...) {
 falcon 的 AddFB2 调用点（`0x2c7090..0x2c70a0`）用同样的 mov/movk/csel 构造
 AR24/RG16。**修复**：`0x2c7098` 一条指令 `mov w0, #0x5241 → #0x5258`（AR24 → XR24）。
 
-两处补丁由 `vm/_x7-probe/patch-fourcc.py` 生成（对原始 `libfalcon.so` 打，产出
+两处补丁由本机脚本 `vm/_x7-probe/patch-fourcc.py` 生成（对原始 `libfalcon.so` 打，产出
 `packs/x7/patches/libfalcon.so`，经 `[adapt.replace]` 覆盖 guest 的
 `/usr/lib/libfalcon.so`；全文件只差这 2 条指令）。修好后的完整链路：
 
@@ -105,7 +105,7 @@ falcon 的 DRM 日志全部丢失。定位过程（用镜像自带的 gdb，注�
 - `/etc/miniapp/resources/youdao_ota_logo.bmp`（内容相同，防 OTA 路径触发同一问题）
 
 固件版本一变（logo 尺寸/面板变化）需要重新生成；生成脚本与取证图在
-`vm/_x7-probe/`（`youdao_startup_logo.bmp` 为从镜像里拉出的原件）。
+`vm/_x7-probe/`（`youdao_startup_logo.bmp` 为从镜像里拉出的原件）。该目录已于 2026-10-21 清理，补丁产物在本包 `patches/` 内。
 
 ## 机型身份与主题
 

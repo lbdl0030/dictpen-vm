@@ -325,7 +325,7 @@ S99wifi-link 等 wpa_supplicant 起来后 `select_network` + `reassociate`；重
    **r0=sret、r1=this**，`std::string` 24 字节。
 
 **做法**：`patches/vmstorage.c` 用 Zig 编成 `libvmstorage-armhf.so`
-（`zig cc -target arm-linux-gnueabihf -shared -fPIC -O2 -nostdlib -L vm/_s7root/lib -lc`，
+（`zig cc -target arm-linux-gnueabihf -shared -fPIC -O2 -nostdlib -L vm/_s7root/lib -lc`（`vm/_s7root/` 为清理后不保留的本机 sysroot，配方照抄即可），
 对 s7 的 glibc 2.33 动态链接），覆盖两个 `getStorageInfo` 符号，返回
 `statvfs("/userdata")` 的 `{totalSpace(GB), user(used MB), available(free MB)}`。
 `miniapp-wrapper.sh` 用 `LD_PRELOAD=/usr/lib/libvmstorage-armhf.so` 起
