@@ -2766,9 +2766,13 @@ class TestX7StorageShim(unittest.TestCase):
         self.assertEqual(struct.unpack_from("<H", b, 0x12)[0], 183, "x7 是 AArch64")
         for name in (
                 b"_ZN11YADAPTERAPI18YSystemInfoAdapter14getStorageInfoB5cxx11Ev",
-                b"_ZN11YADAPTERAPI8Internal25YSystemInfoAdapterPrivate14getStorageInfoB5cxx11Ev"):
+                b"_ZN11YADAPTERAPI8Internal25YSystemInfoAdapterPrivate14getStorageInfoB5cxx11Ev",
+                b"_ZN11YADAPTERAPI18YSystemInfoAdapter13verifyLicenseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+                b"_ZN11YADAPTERAPI8Internal25YSystemInfoAdapterPrivate13verifyLicenseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"):
             self.assertIn(name, b)
         self.assertIn(b"libc.so.6", b)
+        src = (self._root() / "packs/x7/patches/vmstorage.c").read_text(encoding="utf-8")
+        self.assertIn("verifyLicense", src)
 
     def test_pack_installs_via_fixup(self):
         root = self._root()

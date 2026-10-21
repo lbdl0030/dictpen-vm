@@ -201,3 +201,25 @@ python scripts\dpctl.py tap 510 133          :: 点"查词翻译"
 - 关于页的「存储容量」与空间清理走同一个 `getSystemInfo`，未单独截到中间滚动位置
   （wheel 单步跨行）；以主入口为准。
 - 单测：`vmgui.tests.test_units.TestX7StorageShim`。
+
+## 激活页：dev license 被 4.8.7 校验失败（Q110，2026-10-21）
+
+**症状**：开机一段时间后停在「开始激活」；`/userdata/cfg/license` 存在过又消失，
+日志：
+
+```
+YStartupModulePrivate::initSecondaryStartupSignal license verify failed,setMiniappCreateFinishFlag
+global.verifyLicense  false redo verify
+```
+
+**根因**：框架的 S00license 写入的是固定的 174 字节开发凭证（a6 只判文件存在，
+所以够用）；x7 的 OS 4.8.7 会真的验签，VM 又没有可用设备码走服务器签发，验签失败后
+应用把凭证删掉并停在激活页。a7pro 的 4.13.0 也有同类问题（已记台账）。
+
+**做法**：x7 的 `libvmstorage.so` 同时导出
+`YADAPTERAPI::YSystemInfoAdapter::verifyLicense`（public/private 两个 mangled 名），
+返回 `true`；S00license 照常写 dev license。验证时 license 文件保留、不再出现
+`license verify failed`，首页正常。
+
+**验证**：手动补回 `/userdata/cfg/license`（174 B）后启动，首页立即出现；随后重启整机
+由 S00license 重新写入并走包内 shim，确认不再回激活页。
