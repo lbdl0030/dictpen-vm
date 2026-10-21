@@ -6,6 +6,15 @@ LOG=/userdata/applog
 mkdir -p $LOG /userdata/cfg /userdisk/miniapp/data/mini_app/pkg /userdisk/corefile 2>/dev/null
 [ -f /userdata/cfg/debug.cfg ] || cp /etc/debug.cfg /userdata/cfg/debug.cfg 2>/dev/null
 
+# 存储页（Q98）：真机的 S21mountall 会建 /dev/block/by-name；VM 停用它后，
+# 设置里的 getStorageInfo 找不到 userdata/userdisk/system_a/b 会回 -1。
+# 数据盘是 vdb（userdata/userdisk 共用），系统盘是 vda。
+mkdir -p /dev/block/by-name
+ln -sf /dev/vdb /dev/block/by-name/userdata
+ln -sf /dev/vdb /dev/block/by-name/userdisk
+ln -sf /dev/vda /dev/block/by-name/system_a
+ln -sf /dev/vda /dev/block/by-name/system_b
+
 # 板型（Q89）：厂商 HAL 的 youdao_get_pcba_version() 读 /proc/device-tree/model，
 # 拿固定字符串表映射成 hal_key_config.json 的节名。QEMU 给的是 linux,dummy-virt，
 # 映射成 unkown_V? → 所有按键模块 init 失败 -14。内核不让写 model，用 bind mount

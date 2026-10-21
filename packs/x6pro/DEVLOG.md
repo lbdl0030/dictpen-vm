@@ -602,6 +602,21 @@ grep -E '^Event' /tmp/ev1.log
   `up --fast` 拒绝。保存快照约 1.5–2 分钟，控制台会先要求关机并确认覆盖。
 - 台账 Q93；`vm/_bootbench.py`；控制台「快速启动/保存快照」入口。
 
+## 7.13 设置存储显示：-1GB 的根因是 `/dev/block/by-name`（2026-10-21）
+
+- **现象**：设置 → 空间清理显示 `已使用-0.0GB/-1GB`；扩容状态盘后也不变。
+- **根因**：`prepare.sh` 停用了真机的 `S21mountall`，guest 里没有 `/dev/block/by-name`；
+  设置的 `getStorageInfo`（`libyddal_adapter.so`）打开这个目录失败 → `-1`。strace 证据：
+  `openat("/dev/block/by-name", O_DIRECTORY) = -1 ENOENT`；补目录/symlink 后
+  `getStorageInfo` 从 fail 变 success，页面显示 4GB。
+- **修法**：`S50vm-ui` 在 app 起来前建
+  `userdata/userdisk -> /dev/vdb`、`system_a/system_b -> /dev/vda`。
+- **边界**：厂商适配层报的是**固件认的硬件容量**（x6pro 4GB），不是 VM 状态盘。
+  状态盘 1G→2G 并 `resize2fs` 后客机 `df` 是 2.0G（可用 1.6G），但设置页仍显示 4GB；
+  实际数字看控制台「配置」页的宿主/客机两格。要让设置页跟着 VM 盘变，需要改厂商
+  storage API（未做）。
+- 截图 `vm/_x6_storage_fixed.png` / `vm/_x6_storage_2g_c.png`；台账 Q98。
+
 ## 8. 版权
 
 镜像版权归**网易有道**，仅供个人学习研究；包内合成器为 Debian 项目发行物（各自许可）。`weston.tar` 与 `images/` 均不进可传播代码包。

@@ -1251,6 +1251,10 @@ class ConsoleWindow(QMainWindow):
                                  "两个数本来就差着一截（ext4 元数据），差得**多**才是"
                                  "扩了盘没跑 `resize2fs`。")
         v.addWidget(self.lbl_disk)
+        self.lbl_disk_note = QLabel(
+            "扩容只改虚拟机状态盘；笔内「空间清理」显示固件认的硬件容量，不随 VM 盘变化。")
+        self.lbl_disk_note.setWordWrap(True)
+        v.addWidget(self.lbl_disk_note)
         row2 = QHBoxLayout()
         row2.setSpacing(4)
         self.f_disk = QLineEdit()
