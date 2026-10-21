@@ -179,3 +179,25 @@ python scripts\dpctl.py tap 510 133          :: 点"查词翻译"
   没有可用的 Home/音量键；控制台工具条三颗键全灰，本包不安装 `vm-keys*`。
 - 若真机确实有 Home 键，需要从该机的 DTB 或其它输入服务另找路径，不能复用 s6/x5 的配方。
 - 快速启动仍可用：`dpctl fast save --pack x7`（无音频，见 README 与台账 Q93）。
+
+## 设置存储跟随 VM 状态盘（Q109，2026-10-21）
+
+**症状**：设置 → 空间清理显示 **-2.5GB/4GB**（状态盘 8GB），空间清理列表能出来但容量账本
+不跟随。
+
+**做法**：x7 的 app 是 AArch64 + glibc 2.36，与 x6pro 同 ABI；直接复用 x6 的
+`libvmstorage.so`（只要求 GLIBC_2.17，实测 2.36 可加载）。`fixup.sh` 在首靴把
+`/usr/bin/miniapp` 换成 `LD_PRELOAD` wrapper、原启动器留 `.real`；shim 放
+`/usr/lib/vmstorage/`。x7 没有本包的 runDictPen 替换，故必须走 fixup，不能只改
+`/usr/bin`（a7 上实测直接改不跨重启）。
+
+**操作这台的一个坑**：设置列表对触摸拖动几乎不动，QMP 的 `wheel-down` 才能滚；
+`wheel-up` 到顶会直接拉出快捷面板，不是列表回滚。
+
+**验证**（8G 状态盘）：
+- app 启动约 470 s（既有现象），首页出画后 `grep vmstorage /proc/<pid>/maps` 命中
+  `/usr/lib/vmstorage/libvmstorage.so`。
+- 设置 → 空间清理：**已使用 1.3GB/8GB**（`vm/_x7_pack_storage2.png`）。
+- 关于页的「存储容量」与空间清理走同一个 `getSystemInfo`，未单独截到中间滚动位置
+  （wheel 单步跨行）；以主入口为准。
+- 单测：`vmgui.tests.test_units.TestX7StorageShim`。

@@ -22,6 +22,7 @@ rotation = 270
 bpp      = 32
 
 [adapt]
+hooks       = ["patches/fixup.sh"]              # 存储 shim 安装（Q109）
 touchbridge = "patches/touchbridge.pl"         # 鼠标 -> 触摸桥（uinput）
 cfg_overlay = "patches/cfg.json.overrides"     # 归零旋转/偏移 + 指向桥的节点
 battery     = true                             # 伪造健康电量（VM 没有 PMIC）
@@ -44,3 +45,8 @@ size_mb = 8192
 # 这两份是按 VM 面板重制的裸帧（有道 logo 居中摆正），大小恰好 = pitch*height。
 "patches/logo-startup.bin" = "/etc/miniapp/resources/youdao_startup_logo.bmp"
 "patches/logo-ota.bin" = "/etc/miniapp/resources/youdao_ota_logo.bmp"
+# 64 位存储 shim（Q109）：x7 是 AArch64 + glibc 2.36，直接复用 x6 的 AArch64 shim
+# （只要求 GLIBC_2.17）。新增文件经 S00replace 装不上；这里只带进 initrd，落盘由
+# fixup.sh 做。
+"patches/libvmstorage.so" = "/usr/lib/vmstorage/libvmstorage.so"
+"patches/miniapp-wrapper.sh" = "/usr/lib/miniapp-wrapper.sh"

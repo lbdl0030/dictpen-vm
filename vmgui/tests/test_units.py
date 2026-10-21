@@ -2752,5 +2752,36 @@ class TestA6StorageShim(unittest.TestCase):
         self.assertIn("patches/fixup.sh", toml)
 
 
+class TestX7StorageShim(unittest.TestCase):
+    """x7：AArch64 + glibc 2.36，复用 x6 的 AArch64 shim。"""
+
+    def _root(self):
+        return pathlib.Path(__file__).resolve().parents[2]
+
+    def test_shim_is_aarch64_and_exports_both_storage_symbols(self):
+        import struct
+        p = self._root() / "packs/x7/patches/libvmstorage.so"
+        b = p.read_bytes()
+        self.assertEqual(b[:4], b"\x7fELF")
+        self.assertEqual(struct.unpack_from("<H", b, 0x12)[0], 183, "x7 是 AArch64")
+        for name in (
+                b"_ZN11YADAPTERAPI18YSystemInfoAdapter14getStorageInfoB5cxx11Ev",
+                b"_ZN11YADAPTERAPI8Internal25YSystemInfoAdapterPrivate14getStorageInfoB5cxx11Ev"):
+            self.assertIn(name, b)
+        self.assertIn(b"libc.so.6", b)
+
+    def test_pack_installs_via_fixup(self):
+        root = self._root()
+        fixup = (root / "packs/x7/patches/fixup.sh").read_text(encoding="utf-8")
+        self.assertIn("/patches/libvmstorage.so", fixup)
+        self.assertIn('"$TARGET/usr/lib/vmstorage/libvmstorage.so"', fixup)
+        self.assertIn("/usr/bin/miniapp.real", fixup)
+        wrapper = (root / "packs/x7/patches/miniapp-wrapper.sh").read_text(encoding="utf-8")
+        self.assertIn("LD_PRELOAD=/usr/lib/vmstorage/libvmstorage.so", wrapper)
+        toml = (root / "packs/x7/pack.toml").read_text(encoding="utf-8")
+        self.assertIn("patches/fixup.sh", toml)
+        self.assertIn("patches/libvmstorage.so", toml)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
