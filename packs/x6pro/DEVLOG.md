@@ -611,11 +611,31 @@ grep -E '^Event' /tmp/ev1.log
   `getStorageInfo` 从 fail 变 success，页面显示 4GB。
 - **修法**：`S50vm-ui` 在 app 起来前建
   `userdata/userdisk -> /dev/vdb`、`system_a/system_b -> /dev/vda`。
-- **边界**：厂商适配层报的是**固件认的硬件容量**（x6pro 4GB），不是 VM 状态盘。
-  状态盘 1G→2G 并 `resize2fs` 后客机 `df` 是 2.0G（可用 1.6G），但设置页仍显示 4GB；
-  实际数字看控制台「配置」页的宿主/客机两格。要让设置页跟着 VM 盘变，需要改厂商
-  storage API（未做）。
+- **下一步（已做，§7.14）**：厂商适配层报的是固定硬件 JSON（4GB、user/available 0），
+  状态盘扩容不会改变它。用 preload shim 覆盖同名 `getStorageInfo`，改成 VM 状态盘。
 - 截图 `vm/_x6_storage_fixed.png` / `vm/_x6_storage_2g_c.png`；台账 Q98。
+
+## 7.14 设置存储跟随 VM 状态盘：preload shim（2026-10-21）
+
+- **固定 JSON**：gdb 在 `libyddal_adapter.so` 的私有
+  `YSystemInfoAdapterPrivate::getStorageInfo()` 返回处抓到时发现，AArch64 的
+  `std::string` 返回值在 **x8**（不是 x0）：
+  `{"totalSpace":4,"firmware":4036,"resource":60,"user":0,"available":0}`。
+  把 JSON 临时改成 `totalSpace=2,user=373,available=999` 后页面显示 `0.4GB/2GB`，
+  由此确认字段：total=GB、user/available=MB。
+- **shim**：`patches/vmstorage.c` 用 C 导出两个 mangled 符号（public + private），
+  返回 32 字节 struct（libstdc++ string 布局），内容来自 `statvfs("/userdata")`：
+  `totalSpace=ceil(total/1G)`、`user=usedMB`、`available=freeMB`、firmware/resource=0。
+  编译（Zig 0.13，ARM64）：
+  `zig cc -target aarch64-linux-gnu -shared -fPIC -O2 -o libvmstorage.so vmstorage.c`。
+- **注入**：`pack.toml [adapt].extra` 把 shim/wrapper 带进 initrd；`prepare.sh` 把 shim
+  放 `/usr/lib/libvmstorage.so`，把 `/usr/bin/miniapp` 换成 wrapper（真启动器保留
+  `/usr/bin/miniapp.real`）。guardian 也按 `/usr/bin/miniapp` 起，所以一处覆盖即可。
+- **实测**：2G 盘 `0.4GB/2GB`；3G 盘 `0.4GB/3GB`（`vm/_x6_storage_pack3g.png`）；
+  `/proc/<miniapp>/maps` 能看到 `/usr/lib/libvmstorage.so`。
+- **边界**：这是 VM 适配 shim（不是固件派生物）；`scripts/package.py` 的纯代码包仍
+  按 `.so` 拦截，完整发布包才带。其他机型要按各自适配层符号/UI 逐台验证。
+- 台账 Q99；`patches/miniapp-wrapper.sh`、`patches/prepare.sh`。
 
 ## 8. 版权
 

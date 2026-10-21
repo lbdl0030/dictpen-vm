@@ -66,3 +66,15 @@ if [ -f "$AUDIO_CFG" ]; then
     { print }
     ' "$AUDIO_CFG" > "$AUDIO_CFG.vm-tmp" && mv -f "$AUDIO_CFG.vm-tmp" "$AUDIO_CFG"
 fi
+# 设置存储（Q99）：厂商 getStorageInfo 报固定硬件容量；preload shim 改成 VM 状态盘。
+# 真启动器保留为 /usr/bin/miniapp.real；/usr/bin/miniapp 换成只加 LD_PRELOAD 的 wrapper
+# （guardian 也是按 /usr/bin/miniapp 起，所以这一处就能覆盖）。
+if [ -f /patches/libvmstorage.so ]; then
+    cp -f /patches/libvmstorage.so "$TARGET/usr/lib/libvmstorage.so"
+    chmod 755 "$TARGET/usr/lib/libvmstorage.so"
+    if [ -x "$TARGET/usr/bin/miniapp" ] && [ ! -e "$TARGET/usr/bin/miniapp.real" ]; then
+        mv "$TARGET/usr/bin/miniapp" "$TARGET/usr/bin/miniapp.real"
+    fi
+    cp -f /patches/miniapp-wrapper.sh "$TARGET/usr/bin/miniapp"
+    chmod 755 "$TARGET/usr/bin/miniapp"
+fi

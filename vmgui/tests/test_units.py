@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import pathlib
 import subprocess
 import sys
 import unittest
@@ -2561,6 +2562,41 @@ class TestEnsureTone(unittest.TestCase):
                 data = w.readframes(w.getnframes())
         vals = struct.unpack("<%dh" % (len(data) // 2), data)
         self.assertGreater(max(vals), 1000)
+
+
+class TestX6StorageShim(unittest.TestCase):
+    """x6pro：设置存储跟随 VM 状态盘的 preload shim 必须随包完整落盘。"""
+
+    def _root(self):
+        return pathlib.Path(__file__).resolve().parents[2]
+
+    def test_shim_is_aarch64_and_exports_both_symbols(self):
+        import struct
+        p = self._root() / "packs/x6pro/patches/libvmstorage.so"
+        b = p.read_bytes()
+        self.assertEqual(b[:4], b"\x7fELF")
+        self.assertEqual(struct.unpack_from("<H", b, 0x12)[0], 183, "必须是 AArch64")
+        for name in (
+                b"_ZN11YADAPTERAPI18YSystemInfoAdapter14getStorageInfoB5cxx11Ev",
+                b"_ZN11YADAPTERAPI8Internal25YSystemInfoAdapterPrivate14getStorageInfoB5cxx11Ev"):
+            self.assertIn(name, b)
+        self.assertIn(b"libc.so.6", b, "要动态链接客机 libc，不能把 malloc 拷一份进来")
+        src = (self._root() / "packs/x6pro/patches/vmstorage.c").read_text(encoding="utf-8")
+        self.assertIn('statvfs("/userdata"', src)
+        self.assertIn('\\"totalSpace\\"', src)
+
+    def test_pack_installs_shim_and_wrapper(self):
+        root = self._root()
+        wrapper = (root / "packs/x6pro/patches/miniapp-wrapper.sh").read_text(encoding="utf-8")
+        self.assertIn("/usr/lib/libvmstorage.so", wrapper)
+        self.assertIn("/usr/bin/miniapp.real", wrapper)
+        prep = (root / "packs/x6pro/patches/prepare.sh").read_text(encoding="utf-8")
+        self.assertIn("/patches/libvmstorage.so", prep)
+        self.assertIn('"$TARGET/usr/lib/libvmstorage.so"', prep)
+        self.assertIn("miniapp-wrapper.sh", prep)
+        toml = (root / "packs/x6pro/pack.toml").read_text(encoding="utf-8")
+        self.assertIn("patches/libvmstorage.so", toml)
+        self.assertIn("patches/miniapp-wrapper.sh", toml)
 
 
 if __name__ == "__main__":

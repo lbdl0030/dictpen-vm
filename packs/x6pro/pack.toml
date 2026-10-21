@@ -25,6 +25,8 @@ ap = true
 touchbridge = "patches/touchbridge.pl"
 cfg_overlay = "patches/cfg.json.overrides"
 hooks = ["patches/prepare.sh"]
+# Q99：preload shim + miniapp wrapper 要进 initrd，prepare.sh 才拿得到 /patches/*
+extra = ["patches/libvmstorage.so", "patches/miniapp-wrapper.sh"]
 
 [adapt.replace]
 "patches/get_pcba_version" = "/usr/bin/get_pcba_version"
