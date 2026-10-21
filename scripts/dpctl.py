@@ -443,7 +443,7 @@ def find_pyside_python():
     return None
 
 
-def start_vmgui(python_cmd, profile=""):
+def start_vmgui(python_cmd, profile="", pack_name=""):
     """把 vmgui 作为 VM 的显示前端拉起来（QEMU 用 -display none，画面走 QMP）。"""
     stop_vmgui()
     script = os.path.join(ROOT, "vmgui")
@@ -453,6 +453,8 @@ def start_vmgui(python_cmd, profile=""):
     log = open(os.path.join(VM, "vmgui.out"), "ab")
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if is_windows() else 0
     args = ["-u", "-m", "vmgui"] + (["--profile", profile] if profile else [])
+    if pack_name:
+        args += ["--pack", pack_name]
     proc = subprocess.Popen(python_cmd + args, cwd=ROOT,
                             stdout=log, stderr=subprocess.STDOUT,
                             creationflags=flags)
@@ -1401,7 +1403,7 @@ def cmd_up(args):
         # 不要先探测 QMP 端口：QEMU 的 chardev 只服务一个客户端，"连上又不读数
         # 就断开"会把它的 listen 卡死（之后全部连接被拒）。vmgui 自己会退避重试，
         # 且连上后就握住连接等问候语，不会半开即弃。
-        start_vmgui(frontend, pack.client_profile)
+        start_vmgui(frontend, pack.client_profile, pack.name)
     elif args.pointer is not False and display == "gtk":
         start_pointer()
     return 0
@@ -1817,6 +1819,23 @@ def png_bytes(w, h, rgb, zoom=1):
             + chunk(b"IEND", b""))
 
 
+def _swap_rb(rgb: bytes) -> bytes:
+    b = bytearray(rgb)
+    for i in range(0, len(b) - 2, 3):
+        b[i], b[i + 2] = b[i + 2], b[i]
+    return bytes(b)
+
+
+def _pack_swap_rb() -> bool:
+    name = current_pack_name()
+    if not name:
+        return False
+    try:
+        return bool(packlib.load_pack(name).swap_rb)
+    except PackError:
+        return False
+
+
 def grab_pen_screen(cw=0, ch=0):
     """Return (w, h, rgb) of the pen's own screen area.
 
@@ -1826,8 +1845,12 @@ def grab_pen_screen(cw=0, ch=0):
         cw, ch = panel_size()
     gw, gh, rgb = read_ppm(screendump())
     if 0 < cw <= gw and 0 < ch <= gh:
-        return cw, ch, crop_rgb(rgb, gw, gh, 0, 0, cw, ch)
-    return gw, gh, rgb
+        w, h, rgb = cw, ch, crop_rgb(rgb, gw, gh, 0, 0, cw, ch)
+    else:
+        w, h = gw, gh
+    if _pack_swap_rb():
+        rgb = _swap_rb(rgb)
+    return w, h, rgb
 
 
 def cmd_screenshot(args):

@@ -16,6 +16,9 @@ xres     = 640
 yres     = 172
 rotation = 270
 bpp      = 32
+# RV1106 falcon 在这台上按 RGBA 写、bochs 按 BGRA 扫（实测红蓝颠倒）；
+# 由 vmgui/dpctl 在宿主呈现时交换 R/B，客机帧不动。
+swap_rb  = true
 
 [adapt]                                        # a6pro 同族的经验适配
 touchbridge = "patches/touchbridge.pl"         # 鼠标 -> 触摸桥（uinput，axs_ts）

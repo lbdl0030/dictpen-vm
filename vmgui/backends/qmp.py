@@ -210,6 +210,8 @@ class QmpBackend:
         self._state = "disconnected"
         self._fails = 0
         self._dump = os.path.join(tempfile.gettempdir(), "vmgui-frame.ppm")
+        # 某些固件（RV1106 falcon）输出 R/B 与扫描线相反；由会话按包置位。
+        self.swap_rb = False
 
     # ---- 生命周期 ------------------------------------------------------ #
     def start(self) -> None:
@@ -355,7 +357,8 @@ class QmpBackend:
         with open(self._dump, "rb") as f:
             raw = f.read()
         w, h, stride, rgb = parse_ppm(raw)
-        frame = Frame(pixels=rgb, width=w, height=h, stride=stride, fmt="rgb888")
+        frame = Frame(pixels=rgb, width=w, height=h, stride=stride,
+                      fmt="bgr888" if self.swap_rb else "rgb888")
         with self._lock:
             self._last_frame = frame
             new_size = (w, h) != self._size
@@ -380,8 +383,25 @@ class QmpBackend:
                         os.remove(dest)
                 except OSError:
                     pass
-                self._conn.execute("screendump", {"filename": dest, "format": fmt})
-            except (QmpError, OSError) as e:
+                if self.swap_rb and fmt == "png":
+                    # QMP 的 PNG 是解码后的宿主图像，不能再靠 Frame.fmt 纠正；
+                    # 先落 PPM，再用 QImage 交换 R/B 并存 PNG。
+                    tmp = dest + ".ppm"
+                    try:
+                        self._conn.execute("screendump", {"filename": tmp, "format": "ppm"})
+                        from PySide6.QtGui import QImage
+                        img = QImage(tmp)
+                        if img.isNull():
+                            raise RuntimeError("PPM 解码失败")
+                        img.rgbSwapped().save(dest, "PNG")
+                    finally:
+                        try:
+                            os.remove(tmp)
+                        except OSError:
+                            pass
+                else:
+                    self._conn.execute("screendump", {"filename": dest, "format": fmt})
+            except (QmpError, OSError, RuntimeError) as e:
                 log.warning("存图失败 %s: %s", dest, e)
                 self.bus.emit(ev.SHOT, dest, False, str(e))
             else:

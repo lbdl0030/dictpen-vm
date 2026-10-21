@@ -98,6 +98,9 @@ class Pack:
         # vmgui 的 DEFAULTS 与 profile。声明本身还同族不自洽（rv1106 三兄弟 0/270/270）。
         self.rotation = int(disp.get("rotation") or 0)
         self.bpp = int(disp.get("bpp") or 0)
+        # RV1106 的 falcon 输出通道序与 bochs 扫描线相反（实测 a6/a7 红蓝颠倒）。
+        # 只影响宿主呈现；包内用这一位告诉 vmgui/dpctl 在帧上做 R/B 交换。
+        self.swap_rb = bool(disp.get("swap_rb", False))
         self.adapt = data.get("adapt", {})
         self.client_profile = (data.get("client", {}) or {}).get("profile", "")
         self.checks = data.get("checks", {}) or {}

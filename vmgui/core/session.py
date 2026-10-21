@@ -38,6 +38,7 @@ class Session:
         self.cfg = cfg
         self.bus = bus or ev.EventBus()
         self.backend: Optional[Backend] = None
+        self.swap_rb = False
         self.state = "disconnected"
         self.detail = ""
         self.last_error = ""
@@ -51,6 +52,8 @@ class Session:
         if self.backend is not None:
             return
         self.backend = create_backend(self.cfg, self.bus)
+        if hasattr(self.backend, "swap_rb"):
+            self.backend.swap_rb = self.swap_rb
         self.backend.start()
         log.info("会话已启动: %s (%s)", self.cfg.get("connection.kind"),
                  self.cfg.get("connection.uri"))

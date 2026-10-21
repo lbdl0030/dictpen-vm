@@ -70,3 +70,22 @@ python scripts\dpctl.py pack import dist\a6pro.dpm
 - 设置列表要用 mouse 形态拖动（同 s6）才滚得动；
   重启后 app 稳定、`/proc/<pid>/maps` 命中 `/usr/lib/vmstorage/libvmstorage-armhf-uclibc.so`。
 - 单测：`vmgui.tests.test_units.TestA6StorageShim`。
+
+## 显示颜色：R/B 颠倒（Q111，2026-10-21）
+
+**症状**（人点名「A系列颜色问题，查词翻译应该是蓝色」）：首页「查词翻译」是红卡、
+「语音助手」是蓝紫卡，同族 s6pro/x5pro 的对应卡片是冷色；下拉里的音量条也是红的。
+把 a6 截图做 R/B 互换后，「查词翻译」正好变成蓝色、Aa 图标变蓝，语音助手变暖橙——
+比例与同族 UI 一致。
+
+**根因**：RV1106 的 falcon 输出通道序与 bochs 扫描线相反（`RGBA` vs `BGRA`），
+不是主题换色，也不是翻转/补色。
+
+**修法**（只改宿主呈现，不动客机帧）：
+- `[display] swap_rb = true` 声明在 pack.toml；
+- vmgui 取帧时把 `Frame.fmt` 标成 `bgr888`（QImage 按 BGR 解释同一份字节）；
+- QMP 的 PNG 截图先落 PPM，再用 `QImage.rgbSwapped()` 存 PNG；
+- `dpctl screenshot`/`view` 在 `grab_pen_screen()` 里交换 R/B。
+
+**验证**：`vm/_a6_swap_fixed2.png`（蓝「查词翻译」+ 橙「语音助手」+ 紫「随身听」）、
+`vm/_a6_console_swap.png`（控制台帧同色）；单测 `TestDisplaySwapRB`。

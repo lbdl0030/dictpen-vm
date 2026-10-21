@@ -459,3 +459,10 @@ python scripts\dpctl.py sh -c ^
   `S50vm-keys` 等首 app 起来后 apply、停掉 runDictPen 与 app、直接启动一个 miniapp。
 - **验证**：冷启动后选年级页 → 桌面（`vm/_a7_final_after.png`）；单实例；控制台只亮 Home。
 - 快速启动可选：`dpctl fast save --pack a7pro`（无音频，见 README 与台账 Q93）。
+
+## 显示颜色：R/B 颠倒（Q111，2026-10-21）
+
+与 a6pro 同源：RV1106 falcon 的输出通道序与 bochs 扫描线相反。原截图里「查词翻译」是
+黄/橙卡、Aa 图标橙；做 R/B 互换后变成蓝卡 + 蓝 Aa，与同族 UI 一致
+（`vm/_a7_color_swapRB.png` 是离线对照）。修法同样是 `[display] swap_rb = true`，
+由 vmgui/dpctl 在宿主呈现层交换，不动客机帧。单测 `TestDisplaySwapRB`。

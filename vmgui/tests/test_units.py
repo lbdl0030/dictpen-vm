@@ -2787,5 +2787,29 @@ class TestX7StorageShim(unittest.TestCase):
         self.assertIn("patches/libvmstorage.so", toml)
 
 
+class TestDisplaySwapRB(unittest.TestCase):
+    """a6/a7 的 falcon 输出 R/B 与扫描线相反，由宿主呈现层纠正。"""
+
+    def _root(self):
+        return pathlib.Path(__file__).resolve().parents[2]
+
+    def test_a_series_declares_swap_rb(self):
+        root = self._root()
+        for name in ("a6pro", "a7pro"):
+            toml = (root / f"packs/{name}/pack.toml").read_text(encoding="utf-8")
+            self.assertIn("swap_rb  = true", toml, name)
+        for name in ("x5pro", "x6pro", "s6pro", "s7pro", "x7"):
+            toml = (root / f"packs/{name}/pack.toml").read_text(encoding="utf-8")
+            self.assertNotIn("swap_rb", toml, name)
+
+    def test_swap_helper_swaps_r_and_b(self):
+        import sys
+        root = self._root()
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from scripts.dpctl import _swap_rb
+        self.assertEqual(_swap_rb(b"\x01\x02\x03\x04\x05\x06"), b"\x03\x02\x01\x06\x05\x04")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -24,6 +24,9 @@ xres     = 560
 yres     = 170
 rotation = 0
 bpp      = 32
+# RV1106 falcon 在这台上按 RGBA 写、bochs 按 BGRA 扫（实测红蓝颠倒）；
+# 由 vmgui/dpctl 在宿主呈现时交换 R/B，客机帧不动。
+swap_rb  = true
 
 [adapt]                             # 平台适配：声明了才生效
 logo        = "patches/logo.fb.gz"            # 开机 logo（写 /dev/fb0）

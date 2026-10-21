@@ -120,6 +120,18 @@ def _console_panel_crop(out: dict, pack: str | None) -> None:
         out.setdefault("display", {})["crop"] = harness.crop_for(pw, ph)
 
 
+
+def _pack_swap_rb(name: str | None) -> bool:
+    """机型包里声明了 [display].swap_rb 时，宿主呈现层交换 R/B。"""
+    if not name:
+        return False
+    try:
+        from scripts import packlib
+        return bool(packlib.load_pack(name).swap_rb)
+    except Exception:
+        return False
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -162,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
         theme.apply(app)                          # 决策 #65：控制台的 QSS 皮肤
         harness.claim_console_pid()               # 决策 #24：控制台自己记账；#70：down 不收它
         session = Session(cfg)
+        session.swap_rb = _pack_swap_rb(args.pack or harness.current_pack())
         window = ConsoleWindow(cfg, session, args.pack)
         session.start()
         window.show()
@@ -174,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
 
     app.setApplicationName("vmgui")
     session = Session(cfg)
+    session.swap_rb = _pack_swap_rb(args.pack)
     window = MainWindow(cfg, session)
     session.start()
 
