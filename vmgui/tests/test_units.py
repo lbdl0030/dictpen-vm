@@ -2398,6 +2398,27 @@ class TestBtReport(unittest.TestCase):
         self.assertTrue(rep["absent"], "没控制器的机器要写「这台没有蓝牙」，不是「出错」")
 
 
+class TestBtCommands(unittest.TestCase):
+    """蓝牙页的命令形状：有界、不依赖 bluetoothd、开电源顺带开 LE。"""
+
+    def test_scan_is_bounded_and_needs_no_bluetoothd(self):
+        from vmgui.console.window import BT_SCAN_CMD
+        self.assertIn("btmgmt", BT_SCAN_CMD)
+        self.assertIn("--timeout 8", BT_SCAN_CMD)
+        self.assertNotIn("bluetoothctl", BT_SCAN_CMD,
+                         "bluetoothd 没起来时 bluetoothctl 会挂住 D-Bus")
+
+    def test_report_has_no_guest_timeout_dependency(self):
+        from vmgui.console.window import BT_REPORT_CMD
+        self.assertNotIn("timeout 5", BT_REPORT_CMD, "rv1106 客机没有 timeout")
+        self.assertIn("btmgmt info", BT_REPORT_CMD)
+
+    def test_power_on_enables_le(self):
+        from vmgui.console.window import BT_UP_CMD
+        self.assertIn("power on", BT_UP_CMD)
+        self.assertIn("le on", BT_UP_CMD)
+
+
 class TestSndReport(unittest.TestCase):
     """`parse_snd_report`：声卡在 / 不在 / 静音三种形状。"""
 

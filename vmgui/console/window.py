@@ -277,12 +277,17 @@ def _age_text(age: float) -> str:
 # ⚠ 别用 `bluetoothctl devices` 取清单：蓝牙没上电/没有 bluetoothd 时它会**挂住**
 # （实测 `dpctl sh` 直接超时 60 s）。这里只读两个不吃守护进程的地方：
 # `hciconfig`（控制器状态）＋ `/var/lib/bluetooth/*/*/info`（配对库）。
-BT_REPORT_CMD = ("echo @@status; timeout 5 btmgmt info 2>&1 | head -12; "
+BT_REPORT_CMD = ("echo @@status; btmgmt info 2>&1 | head -12; "
                  "echo @@devices; for f in /var/lib/bluetooth/*/*/info; do "
                  "[ -f \"$f\" ] || continue; "
                  "a=$(basename $(dirname $f)); "
                  "n=$(sed -n 's/^Name=//p' \"$f\" | head -1); "
                  "echo \"Device $a ${n:-?}\"; done")
+# 扫描不经过 bluetoothd：客机固件里 bluetoothd 由笔的蓝牙入口拉起，控制台没开那个入口时
+# `bluetoothctl --timeout 8 scan on` 会卡在 D-Bus（实测直接挂住 60 s）。btmgmt 直接和
+# 内核 HCI 说话，`--timeout` 到了就退。
+BT_UP_CMD = "btmgmt power on 2>&1; btmgmt le on 2>&1"
+BT_SCAN_CMD = "btmgmt --timeout 8 find 2>&1 | tail -20"
 
 
 # 声音页：只读两处 —— 声卡清单与那颗 mixer 控件；控件名是 QEMU USB Audio 报的原文。
@@ -833,7 +838,7 @@ class ConsoleWindow(QMainWindow):
         self.tabs.setTabToolTip(3, "取出来 / 放进去 / 装 miniapp（sftp 通道，文件名带空格也安全）")
         self.tabs.setTabToolTip(4, "这台虚拟机给多少内存 / 几个 vCPU / 多大一块盘"
                                    "（改的都是**下次起机**的事，跑着改不了）")
-        self.tabs.setTabToolTip(5, "客机的蓝牙控制器（只有带 BT 的机器才有；没 hci0 会写明白）")
+        self.tabs.setTabToolTip(5, "客机内的虚拟蓝牙（不是电脑蓝牙；连不到真实设备，需 USB 直通）")
         self.tabs.setTabToolTip(6, "把客机的声音送到宿主；快速启动的快照不含音频")
         # `39` §2 #2：三页全空时别把人扔在一个空画布上 —— 默认停在唯一的**可交互**那页。
         self.tabs.setCurrentIndex(2)
@@ -1293,31 +1298,36 @@ class ConsoleWindow(QMainWindow):
         self.lbl_bt = QLabel("还没查过 —— 按「刷新」")
         self.lbl_bt.setWordWrap(True)
         lay.addWidget(self.lbl_bt)
+        self.lbl_bt_host = QLabel(
+            "客机内的虚拟蓝牙，不是电脑蓝牙：当前只模拟发现，连不到真实耳机/音箱；"
+            "真实设备需要把 USB 蓝牙适配器直通给虚拟机。")
+        self.lbl_bt_host.setWordWrap(True)
+        lay.addWidget(self.lbl_bt_host)
         self.lst_bt = QListWidget()
         self.lst_bt.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.lst_bt.setToolTip("已配对 / 发现过的设备（选一台再点「连接」或「断开」）")
+        self.lst_bt.setToolTip("客机配对库里的设备；虚拟控制器没有实现连接（真实设备需 USB 直通）")
         lay.addWidget(self.lst_bt, 1)
         row = QHBoxLayout()
         row.setSpacing(6)
         self._bt_buttons = []
         for text, tip, slot in (
-                ("刷新", "读 hci0 状态与设备清单（走 guest shell，不占 QMP）",
+                ("刷新", "读 hci0 状态与配对库（走 guest shell，不占 QMP）",
                  lambda: self._bt_run("refresh", BT_REPORT_CMD, 40)),
-                ("开", "btmgmt power on（不行再退回 hciconfig hci0 up）",
-                 lambda: self._bt_run("up", "btmgmt power on 2>&1 || hciconfig hci0 up 2>&1",
-                                      25)),
+                ("开", "btmgmt power on + le on（客机 hci0，不是电脑蓝牙）",
+                 lambda: self._bt_run("up", BT_UP_CMD, 25)),
                 ("关", "btmgmt power off",
                  lambda: self._bt_run("down", "btmgmt power off 2>&1", 25)),
-                ("扫描 8 秒", "bluetoothctl --timeout 8 scan on（控制器要先「开」）",
-                 lambda: self._bt_run("scan",
-                                      "bluetoothctl --timeout 8 scan on 2>&1 | tail -20", 30)),
-                ("连接", "连接列表里选中的那台", self._bt_connect),
-                ("断开", "断开选中那台", self._bt_disconnect)):
+                ("扫描 8 秒", "btmgmt --timeout 8 find（不依赖 bluetoothd；只发现模拟设备）",
+                 lambda: self._bt_run("scan", BT_SCAN_CMD, 30)),
+                ("连接", "虚拟控制器没有实现连接；真实设备需 USB 蓝牙直通", self._bt_connect),
+                ("断开", "虚拟控制器没有实现连接；真实设备需 USB 蓝牙直通", self._bt_disconnect)):
             b = QPushButton(text)
             b.setToolTip(tip)
             b.clicked.connect(slot)
             row.addWidget(b)
             self._bt_buttons.append(b)
+        self._bt_buttons[4].setEnabled(False)
+        self._bt_buttons[5].setEnabled(False)
         row.addStretch(1)
         lay.addLayout(row)
         self.bt_out = self._log_pane()
@@ -1364,12 +1374,12 @@ class ConsoleWindow(QMainWindow):
             for b in self._bt_buttons[1:]:
                 b.setEnabled(False)
             return
-        for b in self._bt_buttons[1:]:
+        for b in self._bt_buttons[1:4]:
             b.setEnabled(True)
         st = {"up": "已开", "down": "没开"}.get(rep["state"], "状态未知")
         name = f"（{rep['name']}）" if rep.get("name") else ""
-        line = f"控制器 hci0{name} · {st}" + (f" · {rep['addr']}" if rep["addr"] else "")
-        line += f" · 设备 {len(rep['devices'])} 台"
+        line = f"客机虚拟控制器 hci0{name} · {st}" + (f" · {rep['addr']}" if rep["addr"] else "")
+        line += f" · 配对库 {len(rep['devices'])} 台"
         if rep["powered_off"]:
             line += "（控制器未开启；请先按「开」）"
         self.lbl_bt.setText(line)
@@ -1382,14 +1392,10 @@ class ConsoleWindow(QMainWindow):
         return it.data(Qt.UserRole) or ""
 
     def _bt_connect(self) -> None:
-        addr = self._bt_selected()
-        if addr:
-            self._bt_run("connect", f"bluetoothctl connect {addr} 2>&1", 40)
+        self._bt_show("虚拟控制器没有实现连接；真实耳机/音箱需要 USB 蓝牙适配器直通")
 
     def _bt_disconnect(self) -> None:
-        addr = self._bt_selected()
-        if addr:
-            self._bt_run("disconnect", f"bluetoothctl disconnect {addr} 2>&1", 30)
+        self._bt_show("虚拟控制器没有实现连接；真实耳机/音箱需要 USB 蓝牙适配器直通")
 
     def _bt_show(self, text: str) -> None:
         self.lbl_bt.setText(text)

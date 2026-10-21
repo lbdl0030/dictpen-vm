@@ -68,7 +68,7 @@ stop-vm.cmd         :: 关闭虚拟机
 | PC 端 adb 调试（`adb shell` / `push` / `pull`） | ✅ guest `adbd` 走 TCP，host 侧自动 connect |
 | 有道 UI（miniapp/falcon/Skia）渲染 | ✅ 上屏、方向正确；窗口按包声明的面板尺寸显示（见"显示与输入"节） |
 | Wi-Fi 硬件虚拟化 | ✅ `mac80211_hwsim` 虚拟网卡（`wlan0`）+ 笔自带的 nl80211 栈（`wpa_supplicant`/`wifi-manager`）；`wlan1` 上是可扫描/可关联的虚拟热点 `Youdao-VM`，并带转发+NAT 上行（见"无线"） |
-| 蓝牙硬件虚拟化 | ⏳ `hci_uart` 挂在第二个串口，宿主 `bt-hci-emu.py` 扮演控制器；guest 内核完成初始化、BlueZ 注册并上电 `hci0`，设备发现待完善 |
+| 蓝牙硬件虚拟化 | ⏳ 客机内虚拟 HCI（`hci_uart` + 宿主 `bt-hci-emu.py`）；控制台可上电/有界扫描，能触发模拟设备；**不是电脑蓝牙**，连接真实设备需 USB 直通 |
 | 跳过激活（开发凭证） | ✅ `S00license` 开机写入 `/userdata/cfg/license`，app 直接进桌面（见"激活与凭证恢复"） |
 | 电池/电源 | ✅ `S00battery` 用 tmpfs 发布健康电量，修掉进桌面后约一分钟的"低电量关机"（见"电源"） |
 | 崩溃日志清理 | ✅ `S00corelog` 开机把 `/userdisk/corefile` 裁到最新 500 个，并常驻 janitor 每 10 分钟再裁（防状态盘被堆满导致点击失效） |
@@ -222,8 +222,13 @@ hciconfig                        # 垫片输出 hci0
 ```
 
 - **现状**：`hci0` 存在、guest 内核初始化通过、BlueZ 有 `/org/bluez/hci0` 并可上电；
-  **设备发现（Inquiry / LE 扫描）还没返回结果**——内核在发现流程里没有下发
-  `LE Set Scan Enable` / `Inquiry`，需要继续补齐 `bt-hci-emu.py` 里的命令语义。
+  `btmgmt --timeout 8 find` 会下发 `Inquiry`，模拟器也回了 `11:22:33:44:55:66`
+  （`vm/bt.log` 可见），但 `btmgmt`/BlueZ 的输出与**连接/配对语义还没补齐**。
+- **边界（控制台这一页的读法）**：开关/扫描的是**客机 `hci0`**，不是电脑蓝牙，也不碰
+  Windows 的蓝牙适配器；扫描只能碰到模拟器里的假设备。控制台「连接」已禁灰，并写明
+  真实耳机/音箱需要把一只 **USB 蓝牙 dongle 直通**给 QEMU（`usb-host` + 客机 `btusb`）；
+  内置 Intel 蓝牙不参与。控制台的扫描已改用有界 `btmgmt --timeout 8 find`——
+  `bluetoothctl` 在 `bluetoothd` 没起来时会挂住 D-Bus。
 
 ### 电源：电池与"低电量关机"
 
