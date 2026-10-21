@@ -504,6 +504,11 @@ hw_mode=g
 channel=1
 auth_algs=1
 ignore_broadcast_ssid=0
+# 虚拟站是 mac80211_hwsim：默认 300 s 空闲会被 deauth，而笔的 wifi-manager
+# 不会自动重连，表现为「网络连接不上」。把空闲踢站关掉并跳过 null-data 轮询。
+ap_max_inactivity=86400
+skip_inactivity_poll=1
+disassoc_low_ack=0
 APCONF
     cat > $TARGET/etc/init.d/S00wifi-ap <<'APHOOK'
 #!/bin/sh
@@ -526,12 +531,33 @@ mkdir -p /var/lib/misc
 /usr/bin/killall -9 hostapd 2>/dev/null
 setsid "$AP/ld-linux-aarch64.so.1" --library-path "$AP/lib" \
     "$AP/hostapd" "$AP/hostapd.conf" >/tmp/hostapd.log 2>&1 </dev/null &
+# hwsim 的省电会让 hostapd 的空闲轮询丢 ACK；station 侧固定关掉。
+/usr/sbin/iw dev wlan0 set power_save off 2>/dev/null
 sleep 2
 if grep -q "AP-ENABLED" /tmp/hostapd.log 2>/dev/null; then
     echo "S00wifi-ap: AP 'Youdao-VM' up on wlan1" >/dev/kmsg
 else
     echo "S00wifi-ap: hostapd did not start: $(tail -n 2 /tmp/hostapd.log 2>/dev/null | tr '\n' ' ')" >/dev/kmsg
 fi
+
+# --- make sure the pen's station knows this AP ------------------------------
+# s7pro 的固件 wpa_supplicant.conf 只有占位 SSID，wlan0 会一直 SCANNING；
+# 把虚拟 AP 的开放网络补进去（已存在则不动）。文件由各包的 wifi 栈读取。
+for CFG in /userdata/cfg/wpa_supplicant.conf /data/cfg/wpa_supplicant.conf; do
+    [ -f "$CFG" ] || continue
+    if ! grep -q 'ssid="Youdao-VM"' "$CFG" 2>/dev/null; then
+        cat >> "$CFG" <<'WPAVM'
+
+network={
+    ssid="Youdao-VM"
+    key_mgmt=NONE
+    priority=2
+}
+WPAVM
+        echo "S00wifi-ap: added Youdao-VM to $CFG" >/dev/kmsg
+    fi
+done
+/usr/sbin/wpa_cli -p /var/run/wpa_supplicant -i wlan0 reconfigure 2>/dev/null
 
 # --- uplink: NAT the AP's clients out through eth0 --------------------------
 # The AP lives inside this guest, so a client's packets really do arrive on
@@ -555,7 +581,66 @@ if [ -x "$AP/iptables-legacy" ]; then
 fi
 APHOOK
     chmod +x $TARGET/etc/init.d/S00wifi-ap
-    echo "S00wifi-ap hook installed (virtual AP on wlan1)"
+    cat > $TARGET/etc/init.d/S99wifi-link <<'LINKEOF'
+#!/bin/sh
+# The pen's wifi-manager starts wpa_supplicant, but several firmwares leave the
+# station scanning even when a matching network block exists (s7pro).  Once the
+# control socket is up, select the virtual AP's network and keep it associated.
+[ "$1" = start ] || exit 0
+[ -e /sys/class/net/wlan0 ] || exit 0
+WPA=""
+for c in /usr/sbin/wpa_cli /sbin/wpa_cli /usr/bin/wpa_cli; do
+    [ -x "$c" ] && { WPA=$c; break; }
+done
+[ -n "$WPA" ] || exit 0
+n=0
+while [ $n -lt 60 ]; do
+    out=$("$WPA" -p /var/run/wpa_supplicant -iwlan0 status 2>/dev/null)
+    echo "$out" | grep -q '^wpa_state=' && break
+    n=$((n + 1)); sleep 2
+done
+id=$("$WPA" -p /var/run/wpa_supplicant -iwlan0 list_networks 2>/dev/null | awk -F'	' '$2=="Youdao-VM"{print $1; exit}')
+[ -n "$id" ] || exit 0
+"$WPA" -p /var/run/wpa_supplicant -iwlan0 select_network "$id" >/dev/null 2>&1
+"$WPA" -p /var/run/wpa_supplicant -iwlan0 reassociate >/dev/null 2>&1
+echo "S99wifi-link: selected Youdao-VM (network $id)" >/dev/kmsg
+
+# Wait for a DHCP lease on the emulated link; some firmwares never run DHCP on
+# wlan0 (x5pro lands on 169.254/16).  Fall back to a static AP-subnet address
+# so the app's Wi-Fi state has a usable IP even though real traffic uses eth0.
+n=0
+while [ $n -lt 3 ]; do
+    ip4=$(ip -4 addr show wlan0 2>/dev/null | awk '/inet /{sub(/\/.*/,"",$2); print $2; exit}')
+    case "$ip4" in 10.201.126.*) break ;; esac
+    if command -v udhcpc >/dev/null 2>&1; then
+        udhcpc -n -q -t 3 -T 2 -i wlan0 >/dev/null 2>&1
+    fi
+    n=$((n + 1)); sleep 1
+done
+ip4=$(ip -4 addr show wlan0 2>/dev/null | awk '/inet /{sub(/\/.*/,"",$2); print $2; exit}')
+case "$ip4" in
+    10.201.126.*) ;;
+    *)
+        ifconfig wlan0 10.201.126.2 netmask 255.255.255.0 up 2>/dev/null
+        ip route add 10.201.126.0/24 dev wlan0 src 10.201.126.2 2>/dev/null
+        ip4=10.201.126.2
+        ;;
+esac
+echo "S99wifi-link: wlan0 $ip4" >/dev/kmsg
+# keep it alive without fighting an explicit user disconnect: only retry when
+# the station state is SCANNING/DISCONNECTED, not when wpa_supplicant is gone.
+(
+    while :; do
+        sleep 20
+        st=$("$WPA" -p /var/run/wpa_supplicant -iwlan0 status 2>/dev/null | sed -n 's/^wpa_state=//p')
+        [ -n "$st" ] || continue
+        [ "$st" = "COMPLETED" ] && continue
+        "$WPA" -p /var/run/wpa_supplicant -iwlan0 reassociate >/dev/null 2>&1
+    done
+) >/dev/null 2>&1 </dev/null &
+LINKEOF
+    chmod +x $TARGET/etc/init.d/S99wifi-link
+    echo "S99wifi-link hook installed"
 fi
 
 # --- virtual Bluetooth controller (hci0) ------------------------------------

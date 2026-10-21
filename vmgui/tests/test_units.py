@@ -2811,5 +2811,21 @@ class TestDisplaySwapRB(unittest.TestCase):
         self.assertEqual(_swap_rb(b"\x01\x02\x03\x04\x05\x06"), b"\x03\x02\x01\x06\x05\x04")
 
 
+
+class TestWifiApHook(unittest.TestCase):
+    """虚拟 AP：别被空闲踢站，且 station 侧要知道/选中 Youdao-VM。"""
+
+    def _root(self):
+        return pathlib.Path(__file__).resolve().parents[2]
+
+    def test_initramfs_keeps_station_associated(self):
+        src = (self._root() / "scripts/initramfs-init.sh").read_text(encoding="utf-8")
+        self.assertIn("ap_max_inactivity=86400", src)
+        self.assertIn("skip_inactivity_poll=1", src)
+        self.assertIn("S99wifi-link", src)
+        self.assertIn('ssid="Youdao-VM"', src)
+        self.assertIn("select_network", src)
+        self.assertIn("10.201.126.2", src)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -245,10 +245,12 @@ busybox 对 `dir/.` 源报 `cp: omitting directory ...`，libtomcrypt/libtommath
 iptables/NAT 一段；② **本包所有起机时序数字都是在 `ap=false` 下量的**（框架侧控制台那批
 `33~185 s`、`UI_ATTACH_GRACE_S` 一类判据），翻开后**要重测**；③ `wlan1` 会占住 `10.201.126.0/24`。
 
-**没解决的部分（别把这条读成"激活能过了"**：`wlan0` 有 AP 可扫之后**仍停在 `wpa_state=SCANNING`、
-没 IP** —— `wifi-manager` 只扫不自动关联，**要人点那个 SSID**；再往后的业务激活还要 `sn`/`uuid`
-（`dpctl sysinfo` 要人给 `--sn --uuid`，框架不自己编；本包 `system_info.bin` 里第一个串是
-`02:00:00:00:00:00`，即 wlan0 的 MAC 全零）。**"能扫到" ≠ "能激活"，后半段仍未验证。**
+**2026-10-21 更新（Q112）**：`wlan0` 原来扫到 AP 后仍停在 `SCANNING`，因为本包
+`wpa_supplicant.conf` 只有占位 SSID。框架的 S00wifi-ap 现在会补 `Youdao-VM` 开放网络块，
+S99wifi-link 等 wpa_supplicant 起来后 `select_network` + `reassociate`；重启实测
+`wpa_state=COMPLETED`、`ip_address=10.201.126.x`，应用日志 `onInternetConnectChanged connect=1`。
+业务激活仍要 `sn`/`uuid`（`dpctl sysinfo` 要人给 `--sn --uuid`，框架不自己编；本包
+`system_info.bin` 里第一个串是 `02:00:00:00:00:00`）。**Wi-Fi 通了 ≠ 激活能过，后半段仍未验证。**
 - runDictPen 替代版删除了厂商的"每次清日志"与"崩溃 5 次 reboot"分支；splash 隐藏块
   也已删除（该文件在本固件中**不存在**，find 全盘无——那块代码从第一天起就是死代码，
   当年的黑屏真因见 §4）。

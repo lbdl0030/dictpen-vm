@@ -89,3 +89,15 @@ python scripts\dpctl.py pack import dist\a6pro.dpm
 
 **验证**：`vm/_a6_swap_fixed2.png`（蓝「查词翻译」+ 橙「语音助手」+ 紫「随身听」）、
 `vm/_a6_console_swap.png`（控制台帧同色）；单测 `TestDisplaySwapRB`。
+
+## 网络：虚拟 AP 空闲踢站（Q112，2026-10-21）
+
+**症状**（人点名「a6pro网络连接不上」）：开机时能连上 Youdao-VM，过几分钟后应用变成
+`No network service`；`wlan0` 显示 `wpa_state=COMPLETED` 但 AP 侧已把 station 踢掉。
+
+**根因**：虚拟 station 是 `mac80211_hwsim`，hostapd 默认 300 s 空闲 deauth；笔的
+`wifi-manager` 不会自动重连，而 eth0 本身一直是通的（所以 `ping 223.5.5.5` 正常）。
+
+**修法**（框架 S00wifi-ap）：`ap_max_inactivity=86400`、`skip_inactivity_poll=1`、
+`disassoc_low_ack=0`，station 侧关 `power_save`；S99wifi-link 负责选网/重连。
+a6pro 连续 7 分钟 `wpa_state=COMPLETED`、AP station 在，应用 `connect=1`。
