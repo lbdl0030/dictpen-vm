@@ -138,7 +138,7 @@ python scripts\dpctl.py up
 - 若状态盘不可用，自动回落到原来的 tmpfs 行为，VM 仍能正常开机。
 
 > **扩容只改 VM 状态盘**：控制台「配置」页把它扩到更大后，客机 `df` 会变；x6pro、
-> x5pro、s6pro、s7pro 的设置页已由 preload shim 改成读 VM 状态盘（扩容后会跟着变，
+> a6pro、x5pro、s6pro、s7pro 的设置页已由 preload shim 改成读 VM 状态盘（扩容后会跟着变，
 > 两条入口「空间清理」「关于→存储容量」都跟随），其他机型逐步适配。
 > 实际数字看「配置」页的宿主/客机两格。
 

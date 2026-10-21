@@ -2714,5 +2714,43 @@ class TestX5StorageShim(unittest.TestCase):
         self.assertIn("patches/miniapp-wrapper.sh", toml)
 
 
+class TestA6StorageShim(unittest.TestCase):
+    """a6pro：uClibc 用户态，shim 必须 libc-free、用 operator new 分配。"""
+
+    def _root(self):
+        return pathlib.Path(__file__).resolve().parents[2]
+
+    def test_shim_is_armhf_libc_free_and_uses_operator_new(self):
+        import struct
+        p = self._root() / "packs/a6pro/patches/libvmstorage-armhf-uclibc.so"
+        b = p.read_bytes()
+        self.assertEqual(b[:4], b"\x7fELF")
+        self.assertEqual(struct.unpack_from("<H", b, 0x12)[0], 40)
+        for name in (
+                b"_ZN11YADAPTERAPI18YSystemInfoAdapter14getStorageInfoB5cxx11Ev",
+                b"_ZN11YADAPTERAPI8Internal25YSystemInfoAdapterPrivate14getStorageInfoB5cxx11Ev"):
+            self.assertIn(name, b)
+        self.assertIn(b"_Znwj", b, "字符串必须用 libstdc++ operator new 分配")
+        self.assertNotIn(b"libc.so.6", b, "uClibc 上没有 glibc 的 libc.so.6")
+        src = (self._root() / "packs/a6pro/patches/vmstorage.c").read_text(encoding="utf-8")
+        self.assertIn("sys_statfs", src)
+        self.assertIn("_Znwj", src)
+
+    def test_nmt_patch_and_pack_install_chain(self):
+        root = self._root()
+        nmt = (root / "packs/a6pro/patches/libyddal_base_nmt.so").read_bytes()
+        self.assertEqual(nmt[0xc5e4:0xc5e8], b"\x1e\xff\x2f\xe1", "loadNmtPatch 应为 bx lr")
+        fixup = (root / "packs/a6pro/patches/fixup.sh").read_text(encoding="utf-8")
+        self.assertIn("/patches/libvmstorage-armhf-uclibc.so", fixup)
+        self.assertIn('"$TARGET/usr/lib/vmstorage/libvmstorage-armhf-uclibc.so"', fixup)
+        self.assertIn("/usr/bin/miniapp.real", fixup)
+        wrapper = (root / "packs/a6pro/patches/miniapp-wrapper.sh").read_text(encoding="utf-8")
+        self.assertIn("LD_PRELOAD=/usr/lib/vmstorage/libvmstorage-armhf-uclibc.so", wrapper)
+        toml = (root / "packs/a6pro/pack.toml").read_text(encoding="utf-8")
+        self.assertIn("patches/libvmstorage-armhf-uclibc.so", toml)
+        self.assertIn("patches/libyddal_base_nmt.so", toml)
+        self.assertIn("patches/fixup.sh", toml)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

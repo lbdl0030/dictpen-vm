@@ -32,12 +32,19 @@ cfg_overlay = "patches/cfg.json.overrides"    # 只覆盖列出的 cfg.json 键
 battery     = true                            # 伪造健康电量（VM 没有 PMIC）
 license     = true                            # 开机写开发凭证，跳过激活页
 ap          = true                            # wlan1 上起虚拟热点 Youdao-VM
-hooks       = ["patches/vm-keys.sh"]           # 实体键三件套（Model bind + uinput helper）
+hooks       = ["patches/fixup.sh", "patches/vm-keys.sh"]  # 存储 shim + 实体键三件套
 extra       = ["patches/vm-keys.pl", "patches/vm-keys-apply", "patches/vm-keys.env", "patches/S50vm-keys"]
 
 [adapt.replace]                     # 开机把包里的文件覆盖到 guest 根的指定位置
 # 键 = 包内路径，值 = guest 绝对路径。框架只按表搬运，不关心文件是什么。
 "patches/libfalcon.so" = "/usr/lib/libfalcon.so"
+# 存储 shim（Q107）：a6 是 uClibc 用户态，shim 是 libc-free 版（raw statfs +
+# libstdc++ operator new）；NMT 库的 loadNmtPatch 首指令改成 bx lr，否则 localdict
+# 缺失时 app 启动即 abort。shim/wrapper 是新增文件，S00replace 只覆盖已存在目标，
+# 这两行只负责带进 initrd，真正落盘由 fixup.sh 做。
+"patches/libvmstorage-armhf-uclibc.so" = "/usr/lib/vmstorage/libvmstorage-armhf-uclibc.so"
+"patches/miniapp-wrapper.sh" = "/usr/lib/miniapp-wrapper.sh"
+"patches/libyddal_base_nmt.so" = "/oem/YoudaoDictPen/output/libs/libyddal_base_nmt.so"
 
 [client]                            # 交给 vmgui 的机型 profile（vmgui/profiles/<名>.toml）
 profile = "pear-a6pro"
