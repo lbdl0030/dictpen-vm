@@ -15,6 +15,15 @@
 #   * LD_LIBRARY_PATH 里的 /etc/miniapp/jsapis 与 /etc/miniapp/messageknife ——
 #     固件原版就有（这台没有 a7pro 那个"漏路径 -> dlopen 失败 -> 全黑"的坑）；
 #   * cd $APP_PATH、core dump 开关、DictPenData/CapData 目录、before miniapp 打点。
+# Q104: 32-bit storage shim + NMT no-op; install the LD_PRELOAD wrapper before the app.
+if [ -f /usr/lib/miniapp-wrapper.sh ]; then
+    if [ ! -e /usr/bin/miniapp.real ]; then
+        mv /usr/bin/miniapp /usr/bin/miniapp.real
+    fi
+    cp -f /usr/lib/miniapp-wrapper.sh /usr/bin/miniapp
+    chmod 755 /usr/bin/miniapp
+fi
+
 APP_PATH=/oem/YoudaoDictPen/output
 cd $APP_PATH
 export LD_LIBRARY_PATH=$APP_PATH/libs:$LD_LIBRARY_PATH:/etc/miniapp/jsapis:/etc/miniapp/messageknife

@@ -57,6 +57,12 @@ extra       = ["patches/perl-tree",         # fixup 素材：Debian armhf perl�
 "patches/get_pcba_version.sh" = "/usr/bin/get_pcba_version"
 # 应用启动脚本：删"每次清日志"与"崩溃 5 次 reboot"（其余与原版逐字一致）
 "patches/runDictPen.sh"       = "/usr/bin/runDictPen"
+# 32 位存储 shim（Q104）：覆盖 getStorageInfo，并跳过缺失的 NMT 本地翻译补丁；
+# runDictPen.sh 会把它装成 /usr/bin/miniapp 的 LD_PRELOAD wrapper。
+# 目标是新增文件，S00replace 只覆盖已存在的目标（[ -e "$dst" ]），所以这两行
+# 只用于把文件带进 initrd；真正落盘由 fixup.sh 第 11 节直接拷进 $TARGET。
+"patches/libvmstorage-armhf.so" = "/usr/lib/libvmstorage-armhf.so"
+"patches/miniapp-wrapper.sh"    = "/usr/lib/miniapp-wrapper.sh"
 # OCR 栈桩化（fixup.sh 第 3 节有完整原因链）：真 libyocr 的 init 链要 CVITEK TPU
 # （/dev/ion、/dev/cvi-tpu0），VM 没有；直接藏会让 dlopen("libyocr.so") 失败 →
 # global/verify jsapi 断 → 全黑。桩 = 真库全导出改写（init/open/create 返回 -1、

@@ -252,3 +252,17 @@ DBEOF
     sed -i '/dropbear/d' "$TARGET/etc/inittab" 2>/dev/null
     echo "pack hook fixup: strace + dropbear (arm64) installed"
 fi
+
+# --- 11. 存储 shim / miniapp 包装器（新增 /usr/lib 文件）------------------------
+# [adapt.replace] 走 rcS 的 S00replace，而它只覆盖**目标已存在**的文件
+# （initramfs-init.sh: `[ -e "$dst" ] || continue`）。这两个文件是新增的，靠
+# replace.list 永远装不上（实测：initrd 里文件在、replace.list 有这两行，boot 后
+# /usr/lib 仍没有）。所以在这里直接拷进 TARGET；runDictPen.sh 负责首靴把
+# /usr/bin/miniapp 换成包装器（仅当 /usr/lib/miniapp-wrapper.sh 存在）。
+if [ -f /patches/libvmstorage-armhf.so ] && [ -f /patches/miniapp-wrapper.sh ]; then
+    mkdir -p "$TARGET/usr/lib"
+    cp -f /patches/libvmstorage-armhf.so "$TARGET/usr/lib/libvmstorage-armhf.so"
+    cp -f /patches/miniapp-wrapper.sh "$TARGET/usr/lib/miniapp-wrapper.sh"
+    chmod 755 "$TARGET/usr/lib/libvmstorage-armhf.so" "$TARGET/usr/lib/miniapp-wrapper.sh"
+    echo "pack hook fixup: armhf storage shim installed"
+fi

@@ -2599,5 +2599,45 @@ class TestX6StorageShim(unittest.TestCase):
         self.assertIn("patches/miniapp-wrapper.sh", toml)
 
 
+class TestS7StorageShim(unittest.TestCase):
+    """s7pro：32 位 armhf shim 的 ABI 与安装链路（S00replace 装不上新增文件）。"""
+
+    def _root(self):
+        return pathlib.Path(__file__).resolve().parents[2]
+
+    def test_shim_is_armhf_and_exports_storage_plus_nmt_symbols(self):
+        import struct
+        p = self._root() / "packs/s7pro/patches/libvmstorage-armhf.so"
+        b = p.read_bytes()
+        self.assertEqual(b[:4], b"\x7fELF")
+        self.assertEqual(b[4], 1, "s7 的 app 是 ELF32（armhf），不能拿 AArch64 那份")
+        self.assertEqual(struct.unpack_from("<H", b, 0x12)[0], 40, "必须是 ARM")
+        for name in (
+                b"_ZN11YADAPTERAPI18YSystemInfoAdapter14getStorageInfoB5cxx11Ev",
+                b"_ZN11YADAPTERAPI8Internal25YSystemInfoAdapterPrivate14getStorageInfoB5cxx11Ev",
+                b"_ZN28YAsyncLocalTranslatorPrivate12loadNmtPatchEv"):
+            self.assertIn(name, b)
+        self.assertIn(b"libc.so.6", b, "要动态链接客机 glibc 2.33")
+        src = (self._root() / "packs/s7pro/patches/vmstorage.c").read_text(encoding="utf-8")
+        self.assertIn('statvfs("/userdata"', src)
+        self.assertIn('\\"totalSpace\\"', src)
+
+    def test_pack_installs_shim_via_fixup_not_only_replace(self):
+        root = self._root()
+        fixup = (root / "packs/s7pro/patches/fixup.sh").read_text(encoding="utf-8")
+        self.assertIn("/patches/libvmstorage-armhf.so", fixup)
+        self.assertIn('"$TARGET/usr/lib/libvmstorage-armhf.so"', fixup)
+        self.assertIn("/patches/miniapp-wrapper.sh", fixup)
+        wrapper = (root / "packs/s7pro/patches/miniapp-wrapper.sh").read_text(encoding="utf-8")
+        self.assertIn("LD_PRELOAD=/usr/lib/libvmstorage-armhf.so", wrapper)
+        self.assertIn("/usr/bin/miniapp.real", wrapper)
+        run = (root / "packs/s7pro/patches/runDictPen.sh").read_text(encoding="utf-8")
+        self.assertIn("/usr/lib/miniapp-wrapper.sh", run)
+        self.assertIn("/usr/bin/miniapp.real", run)
+        toml = (root / "packs/s7pro/pack.toml").read_text(encoding="utf-8")
+        self.assertIn("patches/libvmstorage-armhf.so", toml)
+        self.assertIn("patches/miniapp-wrapper.sh", toml)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

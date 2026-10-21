@@ -41,6 +41,8 @@ MD5 为本地计算的自校验值。镜像版权归网易有道，仅供个人�
 | 激活 | ✅ S00license 开发凭证直接进桌面 |
 | 串口 shell | ✅ S51console-shell（vendor init 不起 respawn 的兜底） |
 | OCR | ⛔ 桩化（无 CVITEK TPU，OCR 功能不可用，其余正常） |
+| 设置存储 | ✅ 跟随 VM 状态盘（shim；空间清理与关于→存储容量都显示 1.8GB/6GB，见 §14） |
+| 本地翻译（NMT） | ⛔ 补丁缺失，shim 跳过加载；词典在线功能正常（见 §14） |
 | adb | 未配（rootfs 的 adbd 情况未查；SSH 已覆盖传输需求） |
 
 ## 3. 与 s6pro/a6pro 的差异与对策
@@ -306,3 +308,43 @@ iptables/NAT 一段；② **本包所有起机时序数字都是在 `ap=false` �
   `guardian_run runDictPen` 行前插入 `vm-keys-apply`（首 app 之前、显示初始化之后）。
 - **验证**：冷启动后查词翻译 → 桌面（`vm/_s7_persist_after.png`）；控制台工具条只亮 Home。
 - 快速启动可选：`dpctl fast save --pack s7pro`（无音频，见 README 与台账 Q93）。
+
+## 14. 设置存储跟随 VM 状态盘（Q104，2026-10-21）
+
+**症状**：空间清理页的容量不跟状态盘走 —— 4G 盘显示 1.3GB/4GB；把状态盘扩到 6G 后
+总容量仍是 4GB、已用变成 **-0.8GB**（负数）。
+
+**根因两层**：
+1. 厂商 `YSystemInfoAdapter::getStorageInfo` 返回的是写死的机型容量/分区账本，不是
+   `statvfs`；盘变大后分子（已用）按真实文件算、分母不动，就出负数。
+2. 这台 app 是 **ELF32 armhf**（`/usr/bin/miniapp`、`libyddal_adapter_core.so` 都是
+   `ld-linux-armhf.so.3`/glibc 2.33）。x6pro 的 AArch64 shim 在这里根本不会被加载。
+   armhf 的 ABI 也不同：`getStorageInfo`（public/private 两个 mangled 名）是
+   **r0=sret、r1=this**，`std::string` 24 字节。
+
+**做法**：`patches/vmstorage.c` 用 Zig 编成 `libvmstorage-armhf.so`
+（`zig cc -target arm-linux-gnueabihf -shared -fPIC -O2 -nostdlib -L vm/_s7root/lib -lc`，
+对 s7 的 glibc 2.33 动态链接），覆盖两个 `getStorageInfo` 符号，返回
+`statvfs("/userdata")` 的 `{totalSpace(GB), user(used MB), available(free MB)}`。
+`miniapp-wrapper.sh` 用 `LD_PRELOAD=/usr/lib/libvmstorage-armhf.so` 起
+`/usr/bin/miniapp.real`；`runDictPen.sh` 在首 app 前把原 `/usr/bin/miniapp` 挪成
+`.real` 并装上包装器。
+
+**安装链的坑**：`[adapt.replace]` 走 rcS 的 `S00replace`，它只覆盖**目标已存在**的文件
+（`[ -e "$dst" ] || continue`）。`/usr/lib` 这两个是新增文件，initrd 里带了、replace.list
+也写了，boot 后仍然没有。因此 fixup.sh 第 11 节直接拷进 `$TARGET/usr/lib`；
+pack.toml 里那两行只负责把文件带进 initrd。串口验证：
+`S00replace: libvmstorage-armhf.so -> /usr/lib/libvmstorage-armhf.so rc=0`。
+
+**NMT 的副作用（同一份 shim）**：app 启动时 `YAsyncLocalTranslatorPrivate::loadNmtPatch`
+找不到 `/userdisk/uresource/localdict/patchV2.bin`（rootfs 只有 nmt 模型，没有补丁），
+抛 `youdao::mini_nmt::MiniNmtException` 直接 abort（core 栈在 `libmini-nmt.so`）。
+shim 里把 `_ZN28YAsyncLocalTranslatorPrivate12loadNmtPatchEv` 做成 no-op 跳过加载；
+**代价是本地翻译功能不可用**，词典/在线翻译不受影响。
+
+**验证**（2026-10-21，6GB 状态盘）：
+- `/usr/lib/libvmstorage-armhf.so` 在、`/usr/bin/miniapp` 是包装器、`.real` 在跑；
+  `grep libvmstorage /proc/<miniapp.real>/maps` 命中；`df -h /userdata` = 5.9G/1.3G 用。
+- 设置 → 空间清理：**已使用 1.8GB/6GB**（`vm/_s7_pack_storage.png`）。
+- 设置 → 关于 → 存储容量 → 已用存储空间：同样 **1.8GB/6GB**（`vm/_s7_pack_about_storage.png`）。
+- 单测：`vmgui.tests.test_units.TestS7StorageShim`（ELF32/机器 40/三个符号/fixup 安装链）。
