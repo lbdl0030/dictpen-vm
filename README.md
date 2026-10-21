@@ -61,7 +61,7 @@ stop-vm.cmd         :: 关闭虚拟机
 | 鼠标 = 触摸（点击 QEMU 窗口驱动笔的 UI） | ✅ uinput 触摸桥 + BTN_TOUCH，见"触控"一节 |
 | 键盘/鼠标输入设备 | ✅ virtio-keyboard/tablet 已接入 |
 | 词典笔控制台（`dpctl console`） | ✅ 设备画面 + 状态栏 + 抽屉（串口 / guest 应用 / 命令 / 文件 / 配置 / 蓝牙 / 声音）；设备下拉切换、F11 全屏、实体键与快速启动工具条 |
-| 声音输出（宿主） | ✅ QEMU usb-audio + 宿主 dsound；控制台声音页可调宿主音量；a6/a7 固件仅带 tinyalsa（`tinyplay` 需 48 kHz 立体声） |
+| 声音输出（宿主） | ✅ QEMU usb-audio + 宿主 dsound；控制台声音页读写客机音量/静音，并常驻提示宿主输出设备的静音/音量；选中其他操作会中断上一条；a6/a7 固件仅带 tinyalsa（`tinyplay` 需 48 kHz 立体声） |
 | 实体键（Home：6 台；音量±：仅 x6pro） | ✅ 客机内 uinput 替身 + 控制台工具条；Home 回桌面；音量改真实 ALSA（见各包 README 的实体键节、`packs/x6pro/DEVLOG.md` §7.11、台账 Q92） |
 | 快速启动（首页快照） | ✅ `dpctl fast save` 把**普通**状态盘复制成 qcow2 并在首页 savevm；`dpctl up --fast` / 控制台「快速启动」约 6 s 恢复首页。快照无音频（usb-audio 不可迁移），要声音请用普通「启动」冷启动（见台账 Q93） |
 | 持久化状态盘（`/state`、`/userdata` 重启不丢） | ✅ 第二块 virtio 盘，首次开机自动格式化 ext4 |

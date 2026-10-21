@@ -2424,7 +2424,122 @@ class TestSndReport(unittest.TestCase):
 
     def test_no_card(self):
         rep = self._p("@@cards\n--- no soundcards ---\n@@mix\n")
-        self.assertTrue(rep["absent"], "没声卡要写「这台没用 --audio 起」，不是「出错」")
+        self.assertTrue(rep["absent"], "没声卡要写「快速启动没有音频」，不是「出错」")
+
+
+class TestConsoleSndCancel(unittest.TestCase):
+    """声音页：新操作顶掉上一条；旧回执作废；没声卡时指向快速启动。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _window(self):
+        from vmgui.console.window import ConsoleWindow
+        cfg = Config.load(cli_overrides={
+            "connection": {"uri": "tcp:127.0.0.1:9", "timeout_ms": 200,
+                           "reconnect": {"enabled": False}},
+            "display": {"frame_poll_ms": 200}}, profiles=[], user_path=os.devnull)
+        win = ConsoleWindow(cfg, Session(cfg), "x6pro")
+        win._probe_timer.stop()
+        win._serial_timer.stop()
+        win._rate_timer.stop()
+        self.addCleanup(win.deleteLater)
+        return win
+
+    def _patch(self, win):
+        from vmgui.console import window as W
+        old = (W.harness.vm_running, W.harness.GuestJob, W.threading.Thread)
+        jobs = []
+
+        class _Job:
+            def __init__(self, args, timeout=300):
+                self.args = list(args)
+                self.timeout = timeout
+                self.canceled = False
+                jobs.append(self)
+
+            def cancel(self):
+                self.canceled = True
+
+            def run(self):
+                return 0, ""
+
+        class _Thread:
+            def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+                self.target = target
+                self.args = tuple(args)
+
+            def start(self):
+                pass
+
+        W.harness.vm_running = lambda: True
+        W.harness.GuestJob = _Job
+        W.threading.Thread = _Thread
+        self.addCleanup(setattr, W.harness, "vm_running", old[0])
+        self.addCleanup(setattr, W.harness, "GuestJob", old[1])
+        self.addCleanup(setattr, W.threading, "Thread", old[2])
+        return jobs
+
+    def test_new_action_interrupts_previous(self):
+        win = self._window()
+        jobs = self._patch(win)
+        win._snd_run("refresh", "cmd-1", 30)
+        first = jobs[-1]
+        win._snd_run("mute", "cmd-2", 30)
+        second = jobs[-1]
+        self.assertTrue(first.canceled, "选了新操作时必须杀掉上一条")
+        self.assertIsNot(second, first)
+        self.assertIs(win._snd_job, second)
+        self.assertNotIn("上一条命令尚未返回", win.lbl_snd.text())
+        self.assertIn("上一条已中断", win.snd_out.toPlainText())
+
+    def test_stale_reply_ignored(self):
+        win = self._window()
+        jobs = self._patch(win)
+        win._snd_run("refresh", "cmd-1", 30)
+        win._snd_run("mute", "cmd-2", 30)
+        win.lbl_snd.setText("sentinel")
+        win._on_snd(win._snd_gen - 1, "refresh", 0,
+                    "@@cards\n 0 [Audio ]: USB-Audio - QEMU USB Audio\n@@mix\n")
+        self.assertEqual(win.lbl_snd.text(), "sentinel",
+                         "被顶掉的命令回执不许再改界面")
+        self.assertIs(win._snd_job, jobs[-1])
+
+    def test_no_card_points_to_fast_start(self):
+        win = self._window()
+        win._snd_render({"absent": True, "card": "", "desc": "", "vol": None,
+                         "muted": False, "ctl": ""})
+        self.assertIn("快速启动", win.lbl_snd.text())
+        self.assertFalse(win.sld_vol.isEnabled())
+        self.assertFalse(win._snd_buttons[1].isEnabled())
+
+
+class TestGuestJob(unittest.TestCase):
+    def test_cancel_before_run_does_not_spawn(self):
+        from vmgui.console import harness
+        job = harness.GuestJob(["__unused__"], timeout=5)
+        job.cancel()
+        rc, out = job.run()
+        self.assertEqual(rc, 130)
+        self.assertIn("已中断", out)
+
+
+class TestEnsureTone(unittest.TestCase):
+    def test_generates_playable_wav(self):
+        import struct
+        import tempfile
+        import wave
+        from vmgui.console import harness
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "tone.wav")
+            self.assertEqual(harness.ensure_tone(path, seconds=0.1), path)
+            with wave.open(path, "rb") as w:
+                self.assertEqual((w.getnchannels(), w.getframerate(), w.getsampwidth()),
+                                 (1, 44100, 2))
+                data = w.readframes(w.getnframes())
+        vals = struct.unpack("<%dh" % (len(data) // 2), data)
+        self.assertGreater(max(vals), 1000)
 
 
 if __name__ == "__main__":

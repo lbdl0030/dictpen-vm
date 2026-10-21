@@ -1332,14 +1332,20 @@ def cmd_up(args):
     # `no default audio driver available`（实测）。客机侧要 snd 模块（见 initrd 清单）。
     # 走 USB 声卡（人选的方案②）：HDA 那条路客机侧 `Cannot probe codecs`，改用 xhci + usb-audio。
     audio_kind = os.environ.get("DICTPEN_AUDIO", "usb")
+    # 宿主后端可换：dsound 在某些 Windows 端点上会“客机在跑、宿主没声”；sdl/wav 用来 A/B。
+    audio_dev = os.environ.get("DICTPEN_AUDIODEV", "dsound")
+    if audio_dev == "wav":
+        audio_dev += ",id=snd0,path=" + os.path.join(VM, "audio-capture.wav")
+    else:
+        audio_dev += ",id=snd0"
     if not audio:
         audio_args = []
     elif audio_kind == "hda":
-        audio_args = ["-audiodev", "dsound,id=snd0",
+        audio_args = ["-audiodev", audio_dev,
                       "-device", "intel-hda",
                       "-device", "hda-duplex,audiodev=snd0"]
     else:
-        audio_args = ["-audiodev", "dsound,id=snd0",
+        audio_args = ["-audiodev", audio_dev,
                       "-device", "qemu-xhci,id=xhci",
                       "-device", "usb-audio,bus=xhci.0,audiodev=snd0"]
     cmd = [QEMU] + runtime.platform_args(pack, ctx) + audio_args + [

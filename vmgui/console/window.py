@@ -390,7 +390,7 @@ class UiBridge(QObject):
     machine = Signal(object)             # 「配置」页的客机侧读数（内存 / CPU / 文件系统）
     machine_note = Signal(str, int, str)  # 「配置」页动作的回执（改参数 / 扩容 / resize2fs）
     bt = Signal(str, int, str)           # 「蓝牙」页的回执（刷新 / 开关 / 扫描 / 连断）
-    snd = Signal(str, int, str)          # 「声音」页的回执（刷新 / 测一下 / 音量）
+    snd = Signal(int, str, int, str)     # 「声音」页的回执（代次 / 刷新 / 测一下 / 音量）
 
 
 class ConsoleWindow(QMainWindow):
@@ -411,7 +411,8 @@ class ConsoleWindow(QMainWindow):
         self._shell_busy = False                          # 窗口内 shell 同时只跑一条
         self._file_busy_flag = False                      # 「文件」页同时只跑一个取/放/装
         self._bt_busy = False                             # 「蓝牙」页同时只跑一条命令
-        self._snd_busy = False                            # 「声音」页同上
+        self._snd_job = None                              # 「声音」页当前命令（可中断）
+        self._snd_gen = 0                                 # 声音页代次：旧命令的回执不认
         self._last_flags_key = ""
         # 后端报上来的连接状态（`""` = 还没收到过任何一次 STATE 事件，**不等于**"没连上"）。
         # `_on_state` 以前只拿它改指针模式、把 state/detail 整个丢掉，于是"从没连上 QMP"和
@@ -833,7 +834,7 @@ class ConsoleWindow(QMainWindow):
         self.tabs.setTabToolTip(4, "这台虚拟机给多少内存 / 几个 vCPU / 多大一块盘"
                                    "（改的都是**下次起机**的事，跑着改不了）")
         self.tabs.setTabToolTip(5, "客机的蓝牙控制器（只有带 BT 的机器才有；没 hci0 会写明白）")
-        self.tabs.setTabToolTip(6, "把客机的声音送到宿主（起机时加 --audio 才有声卡）")
+        self.tabs.setTabToolTip(6, "把客机的声音送到宿主；快速启动的快照不含音频")
         # `39` §2 #2：三页全空时别把人扔在一个空画布上 —— 默认停在唯一的**可交互**那页。
         self.tabs.setCurrentIndex(2)
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -1404,14 +1405,18 @@ class ConsoleWindow(QMainWindow):
         self.lbl_snd = QLabel("还没查过 —— 按「刷新」")
         self.lbl_snd.setWordWrap(True)
         lay.addWidget(self.lbl_snd)
+        self.lbl_snd_host = QLabel(
+            "宿主输出由 Windows 决定：听不到先查系统输出设备是否静音或音量为 0。")
+        self.lbl_snd_host.setWordWrap(True)
+        lay.addWidget(self.lbl_snd_host)
         row = QHBoxLayout()
         row.setSpacing(6)
         self._snd_buttons = []
         for text, tip, slot in (
                 ("刷新", "读声卡与音量（amixer；不占 QMP）",
                  lambda: self._snd_run("refresh", SND_REPORT_CMD, 30)),
-                ("测一下", "把 1 秒 440 Hz 放进客机再播 —— 宿主喇叭应该听到一声嘀",
-                 self._snd_test),
+                ("测一下", "把 1 秒 440 Hz 放进客机再播 —— 宿主喇叭应该听到一声嘀；"
+                           "播放中选其他操作会中断它", self._snd_test),
                 ("静音", "amixer sset ... mute",
                  lambda: self._snd_run("mute", "amixer -c 0 sset '" + SND_CTL + "' mute 2>&1")),
                 ("取消静音", "amixer sset ... unmute",
@@ -1426,9 +1431,10 @@ class ConsoleWindow(QMainWindow):
         # 音量滑杆：**松手才发**一次 amixer（拖动过程不刷命令）。
         vrow = QHBoxLayout()
         vrow.setSpacing(6)
-        vrow.addWidget(QLabel("音量"))
+        vrow.addWidget(QLabel("客机音量"))
         self.sld_vol = QSlider(Qt.Horizontal)
         self.sld_vol.setRange(0, 100)
+        self.sld_vol.setEnabled(False)
         self.sld_vol.setToolTip("松手发一次 amixer sset（QEMU USB Audio 内部是 0~256 档）")
         self.sld_vol.sliderReleased.connect(lambda: self._snd_volume(self.sld_vol.value()))
         vrow.addWidget(self.sld_vol, 1)
@@ -1440,24 +1446,33 @@ class ConsoleWindow(QMainWindow):
         lay.addStretch(1)
         return page
 
+    def _snd_cancel(self) -> None:
+        job, self._snd_job = self._snd_job, None
+        if job is not None:
+            job.cancel()
+            self.snd_out.appendPlainText("上一条已中断")
+
     def _snd_run(self, what: str, cmd: str, timeout: int = 30) -> None:
-        if self._snd_busy:
-            self.lbl_snd.setText("上一条命令尚未返回")
-            return
+        self._snd_cancel()
         if not harness.vm_running():
             self.lbl_snd.setText("虚拟机未运行；音频服务在客机内，启动后可查看")
             return
-        self._snd_busy = True
+        self._snd_gen += 1
+        gen = self._snd_gen
+        job = harness.GuestJob(["sh", "-c", cmd], timeout=timeout)
+        self._snd_job = job
         self.lbl_snd.setText("读取中…")
-        threading.Thread(target=self._snd_worker, args=(what, cmd, timeout),
+        threading.Thread(target=self._snd_worker, args=(gen, what, job),
                          daemon=True).start()
 
-    def _snd_worker(self, what: str, cmd: str, timeout: int) -> None:
-        rc, out = harness.run_dpctl(["sh", "-c", cmd], timeout=timeout)
-        self.bridge.snd.emit(what, rc, out)
+    def _snd_worker(self, gen: int, what: str, job) -> None:
+        rc, out = job.run()
+        self.bridge.snd.emit(gen, what, rc, out)
 
-    def _on_snd(self, what: str, rc: int, out: str) -> None:
-        self._snd_busy = False
+    def _on_snd(self, gen: int, what: str, rc: int, out: str) -> None:
+        if gen != self._snd_gen:            # 被后来的操作顶掉了，回执作废
+            return
+        self._snd_job = None
         self.snd_out.appendPlainText(("$ %s  (rc=%s)\n%s"
                                       % (what, rc, (out or "").strip()[-1200:])))
         if what == "refresh":
@@ -1470,12 +1485,16 @@ class ConsoleWindow(QMainWindow):
 
     def _snd_render(self, rep: dict) -> None:
         if rep["absent"]:
-            self.lbl_snd.setText("客机没有声卡 —— 这台是用 `--audio` 起的吗？（`dpctl up --audio`）")
+            self.lbl_snd.setText(
+                "客机没有声卡：快速启动的快照不含音频，或起机时用了 --no-audio。"
+                "要声音请用普通「启动」冷启动。")
             for b in self._snd_buttons[1:]:
                 b.setEnabled(False)
+            self.sld_vol.setEnabled(False)
             return
         for b in self._snd_buttons[1:]:
             b.setEnabled(True)
+        self.sld_vol.setEnabled(True)
         bits = [f"声卡 card0（{rep['card'] or '?'}）"]
         if rep["desc"]:
             bits.append(rep["desc"])
@@ -1487,19 +1506,35 @@ class ConsoleWindow(QMainWindow):
         self.lbl_snd.setText(" · ".join(bits))
 
     def _snd_test(self) -> None:
-        if self._snd_busy:
-            self.lbl_snd.setText("上一条命令尚未返回")
+        self._snd_cancel()
+        if not harness.vm_running():
+            self.lbl_snd.setText("虚拟机未运行；音频服务在客机内，启动后可查看")
             return
-        self._snd_busy = True
+        self._snd_gen += 1
+        gen = self._snd_gen
         self.lbl_snd.setText("放测试音…")
 
         def work() -> None:
-            tone = os.path.join(os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.abspath(__file__)))), "vm", "_tone.wav")
-            rc1, out1 = harness.put(tone, SND_TONE)
-            rc2, out2 = harness.run_dpctl(
+            tone = harness.ensure_tone()
+            job = harness.GuestJob(["put", tone, SND_TONE], timeout=30)
+            self._snd_job = job
+            if gen != self._snd_gen:        # 上传还没开始就被新操作顶掉
+                job.cancel()
+                return
+            rc1, out1 = job.run()
+            if gen != self._snd_gen:
+                return
+            job = harness.GuestJob(
                 ["sh", "-c", "aplay -D plughw:0,0 " + SND_TONE + " 2>&1"], timeout=30)
-            self.bridge.snd.emit("测试音", rc2 if rc1 == 0 else rc1, (out1 or "") + (out2 or ""))
+            self._snd_job = job
+            if gen != self._snd_gen:
+                job.cancel()
+                return
+            rc2, out2 = job.run()
+            if gen != self._snd_gen:
+                return
+            self.bridge.snd.emit(gen, "测试音", rc2 if rc1 == 0 else rc1,
+                                 (out1 or "") + (out2 or ""))
 
         threading.Thread(target=work, daemon=True).start()
 

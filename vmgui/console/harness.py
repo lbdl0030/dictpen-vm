@@ -12,12 +12,16 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 import os
 import shutil
+import signal
+import struct
 import subprocess
 import sys
 import threading
 import time
+import wave
 from typing import Optional
 
 
@@ -367,6 +371,94 @@ def run_dpctl(args: list, timeout: int = 300) -> tuple[int, str]:
     except OSError:
         pass
     return p.returncode, out
+
+
+def _kill_tree(pid: int) -> None:
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                       capture_output=True)
+        return
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
+    except OSError:
+        pass
+
+
+class GuestJob:
+    """一条可中断的 dpctl 命令。
+
+    声音页的 `aplay` 在声卡忙或后端卡住时不会返回；`run_dpctl` 用
+    `subprocess.run` 拿不到句柄，只能等超时。这里保留 Popen，选中另一个操作时
+    直接杀掉整棵进程树，而不是把人挡在“上一条命令尚未返回”上。
+    """
+
+    def __init__(self, args: list, timeout: int = 300) -> None:
+        self.args = list(args)
+        self.timeout = timeout
+        self._proc = None
+        self._lock = threading.Lock()
+        self.canceled = threading.Event()
+
+    def cancel(self) -> None:
+        self.canceled.set()
+        with self._lock:
+            p = self._proc
+        if p is not None and p.poll() is None:
+            _kill_tree(p.pid)
+
+    def run(self) -> tuple[int, str]:
+        with self._lock:
+            if self.canceled.is_set():
+                return 130, "已中断"
+            kw = {}
+            if os.name == "nt":
+                kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            else:
+                kw["start_new_session"] = True
+            p = subprocess.Popen(_argv(self.args), cwd=ROOT,
+                                 stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 **kw)
+            self._proc = p
+        if self.canceled.is_set():
+            _kill_tree(p.pid)
+        try:
+            data, _ = p.communicate(timeout=self.timeout)
+            rc, out = p.returncode, data.decode("utf-8", "replace")
+        except subprocess.TimeoutExpired:
+            _kill_tree(p.pid)
+            data, _ = p.communicate()
+            rc, out = 124, (data or b"").decode("utf-8", "replace")
+            out += f"\ndpctl {' '.join(self.args)} 超时（{self.timeout}s）"
+        except OSError as e:
+            rc, out = 1, f"启动 dpctl 失败: {e}"
+        if self.canceled.is_set():
+            rc = 130
+            out = (out or "") + "\n已中断"
+        try:
+            with open(os.path.join(VM, "console-dpctl.log"), "ab") as f:
+                f.write(("\n$ dpctl " + " ".join(self.args) + "\n" + out).encode())
+        except OSError:
+            pass
+        return rc, out
+
+
+def ensure_tone(path: Optional[str] = None, seconds: float = 1.0,
+                freq: float = 440.0, rate: int = 44100) -> str:
+    """测试音；发布包里没有 `vm/`，所以不能依赖预先放好的 WAV。"""
+    path = path or os.path.join(VM, "_tone.wav")
+    if os.path.isfile(path) and os.path.getsize(path) > 44:
+        return path
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    frames = b"".join(
+        struct.pack("<h", int(12000 * math.sin(2 * math.pi * freq * i / rate)))
+        for i in range(int(rate * seconds)))
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(frames)
+    return path
 
 
 def start_vm(pack: Optional[str], fresh: bool = False,
