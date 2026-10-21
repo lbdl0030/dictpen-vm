@@ -214,3 +214,18 @@ CFGTP
     chmod +x "$TARGET/etc/init.d/S00cfg-tp"
     echo "pack hook fixup: S00cfg-tp installed"
 fi
+
+# --- 存储 shim / miniapp 包装器（Q106）-------------------------------------------
+# 同 s6pro：新增文件经 [adapt.replace] 的 S00replace 装不上（只覆盖已存在目标），
+# 这里直接落盘。shim 放 /usr/lib/vmstorage/ 子目录，避免客机加载器把顶层 .so
+# 当缺失库候选。NMT no-op 一起带上：覆盖 getStorageInfo 后 loadNmtPatch 在
+# localdict 缺失时会抛异常 abort。
+if [ -f /patches/libvmstorage-armhf.so ] && [ -f /patches/miniapp-wrapper.sh ]; then
+    mkdir -p "$TARGET/usr/lib/vmstorage"
+    cp -f /patches/libvmstorage-armhf.so "$TARGET/usr/lib/vmstorage/libvmstorage-armhf.so"
+    cp -f /patches/miniapp-wrapper.sh "$TARGET/usr/lib/miniapp-wrapper.sh"
+    chmod 755 "$TARGET/usr/lib/vmstorage/libvmstorage-armhf.so" \
+              "$TARGET/usr/lib/miniapp-wrapper.sh"
+    rm -f "$TARGET/usr/lib/libvmstorage-armhf.so"
+    echo "pack hook fixup: armhf storage shim installed"
+fi

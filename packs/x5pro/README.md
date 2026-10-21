@@ -44,6 +44,7 @@ X5pro（板型 **Cherry_Cvitek_1826_V1_5G**，Cvitek **CV1826** 平台，rootfs 
 | 触摸 UI 响应 | ✅ 已通（事件逐层送达 app，坐标正确派发，见 §6.7） |
 | 点中卡片后崩溃 | ✅ **已修**（2026-10-16，真因是桩库抹掉 libstdc++ 弱定义，见 §10） |
 | TCP adb | ⛔ 这族 adbd 是 android-tools 4.2.2，只走 USB gadget（s6pro 同款结论）；S00adbd 保留为兜底 |
+| 设置存储 | ✅ 跟随 VM 状态盘（shim；空间清理与关于→存储容量都显示 0.4GB/1GB，见 §12） |
 
 ## 3. 与 s6pro/s7pro 的差异与对策
 
@@ -487,3 +488,27 @@ grep -c Segmentation /userdata/applog/DictPen_*.log = 0     （navToApp 2 次，
   miniapp（避免守护链与兜底各起一个）。
 - **验证**：冷启动后查词翻译 → 桌面（`vm/_x5_final_after.png`）；单实例；控制台只亮 Home。
 - 快速启动可选：`dpctl fast save --pack x5pro`（无音频，见 README 与台账 Q93）。
+
+
+## 12. 设置存储跟随 VM 状态盘（Q106，2026-10-21）
+
+**症状**：设置 → 空间清理显示 **4.0GB/4GB**，而状态盘只有 1GB；扩盘不跟随。
+
+**根因与 s6pro 同族**：厂商 `getStorageInfo` 返回固定账本；本机 app 是 **ELF32 armhf +
+glibc 2.23**；一旦覆盖存储符号，`loadNmtPatch` 在 `/userdisk/uresource/localdict` 缺失时
+抛异常 abort，所以 shim 必须同时带 NMT no-op（同 s6pro）。
+
+**做法**：`patches/vmstorage.c` 编成 armhf shim，覆盖 public/private 两个
+`getStorageInfo`（r0=sret、r1=this、24B string）并返回 `statvfs("/userdata")`；
+`miniapp-wrapper.sh` 用 `LD_PRELOAD=/usr/lib/vmstorage/libvmstorage-armhf.so` 起
+`/usr/bin/miniapp.real`；`runDictPen.sh` 首 app 前装包装器，`fixup.sh` 把新增文件直接
+拷进 `$TARGET`（`S00replace` 只覆盖已存在目标）。
+
+**验证**（状态盘 1GB）：`df /userdata` = 990.7M/398.4M 用。
+- 设置 → 空间清理：**已使用 0.4GB/1GB**（`vm/_x5_storage_shim3.png`）。
+- 设置 → 关于 → 存储容量：**1GB**，点进去同样 **0.4GB/1GB**
+  （`vm/_x5_about_shim2.png`、`vm/_x5_about_storage_shim.png`）。
+- 设置列表要从卡片内部上拖才滚得动（通用 `swipe.py` 即可，x5 走 BTN_TOUCH 桥）；
+  点「空间清理」后要等 2 s 再截图。
+- 这台设置包是 **1.5.2**（OS 3.4.6 自带），没有 s6pro 的 2.1.6 自动升级问题，本轮未动更新。
+- 单测：`vmgui.tests.test_units.TestX5StorageShim`。

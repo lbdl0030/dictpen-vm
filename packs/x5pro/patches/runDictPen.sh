@@ -5,6 +5,15 @@
 #   * 崩溃计数 -> update_engine --misc=clear; reboot（VM 里 update_engine 已是
 #     空操作，但 reboot 还在——crash-loop 会把 VM 重启进死循环）；
 #   * 日志轮转（保留；guest 的 corelog janitor 与框架 S00corelog 负责清理）。
+# Q106: 32-bit storage shim + NMT no-op; install the LD_PRELOAD wrapper before the app.
+if [ -f /usr/lib/miniapp-wrapper.sh ]; then
+    if [ ! -e /usr/bin/miniapp.real ]; then
+        mv /usr/bin/miniapp /usr/bin/miniapp.real
+    fi
+    cp -f /usr/lib/miniapp-wrapper.sh /usr/bin/miniapp
+    chmod 755 /usr/bin/miniapp
+fi
+
 APP_PATH=/oem/YoudaoDictPen/output
 cd $APP_PATH
 export LD_LIBRARY_PATH=$APP_PATH/libs:$LD_LIBRARY_PATH:/etc/miniapp/jsapis:/etc/miniapp/messageknife

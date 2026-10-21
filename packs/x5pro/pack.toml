@@ -44,6 +44,10 @@ extra       = ["patches/perl-tree",            # fixup 素材：Debian armhf per
 "patches/get_pcba_version.sh"  = "/usr/bin/get_pcba_version"
 "patches/noop_update_engine.sh" = "/usr/bin/update_engine"
 "patches/runDictPen.sh"        = "/usr/bin/runDictPen"
+# 32 位存储 shim + NMT no-op（Q106）。新增文件，S00replace 只覆盖已存在目标；
+# 这两行只用于把文件带进 initrd，真正落盘由 fixup.sh 直拷。
+"patches/libvmstorage-armhf.so" = "/usr/lib/vmstorage/libvmstorage-armhf.so"
+"patches/miniapp-wrapper.sh"    = "/usr/lib/miniapp-wrapper.sh"
 # 注：2026-10-08 曾用"夹取补丁"（替换 libfalcon.so，把算触摸坐标时的 fmax/fmin
 # 换成直通）试图修 y 恒为 0；2026-10-09 反汇编 + 实测复评后**已撤掉**：窗口尺寸
 # 字段 [win+4]/[win+8] 本来就是 800/254，界内触摸不受夹取影响，真因是 cfg 的

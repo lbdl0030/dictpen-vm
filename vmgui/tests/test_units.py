@@ -2679,5 +2679,40 @@ class TestS6StorageShim(unittest.TestCase):
         self.assertIn("patches/miniapp-wrapper.sh", toml)
 
 
+class TestX5StorageShim(unittest.TestCase):
+    """x5pro：与 s6pro 同族（armhf/glibc 2.23），shim 走子目录 + NMT no-op。"""
+
+    def _root(self):
+        return pathlib.Path(__file__).resolve().parents[2]
+
+    def test_shim_is_armhf_and_exports_storage_plus_nmt(self):
+        import struct
+        p = self._root() / "packs/x5pro/patches/libvmstorage-armhf.so"
+        b = p.read_bytes()
+        self.assertEqual(b[:4], b"\x7fELF")
+        self.assertEqual(b[4], 1)
+        self.assertEqual(struct.unpack_from("<H", b, 0x12)[0], 40)
+        for name in (
+                b"_ZN11YADAPTERAPI18YSystemInfoAdapter14getStorageInfoB5cxx11Ev",
+                b"_ZN11YADAPTERAPI8Internal25YSystemInfoAdapterPrivate14getStorageInfoB5cxx11Ev",
+                b"_ZN28YAsyncLocalTranslatorPrivate12loadNmtPatchEv"):
+            self.assertIn(name, b)
+        src = (self._root() / "packs/x5pro/patches/vmstorage.c").read_text(encoding="utf-8")
+        self.assertIn('statvfs("/userdata"', src)
+
+    def test_pack_installs_shim_and_wrapper(self):
+        root = self._root()
+        fixup = (root / "packs/x5pro/patches/fixup.sh").read_text(encoding="utf-8")
+        self.assertIn('"$TARGET/usr/lib/vmstorage/libvmstorage-armhf.so"', fixup)
+        wrapper = (root / "packs/x5pro/patches/miniapp-wrapper.sh").read_text(encoding="utf-8")
+        self.assertIn("LD_PRELOAD=/usr/lib/vmstorage/libvmstorage-armhf.so", wrapper)
+        self.assertIn("/usr/bin/miniapp.real", wrapper)
+        run = (root / "packs/x5pro/patches/runDictPen.sh").read_text(encoding="utf-8")
+        self.assertIn("/usr/lib/miniapp-wrapper.sh", run)
+        toml = (root / "packs/x5pro/pack.toml").read_text(encoding="utf-8")
+        self.assertIn("patches/libvmstorage-armhf.so", toml)
+        self.assertIn("patches/miniapp-wrapper.sh", toml)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
