@@ -2827,5 +2827,53 @@ class TestWifiApHook(unittest.TestCase):
         self.assertIn("select_network", src)
         self.assertIn("10.201.126.2", src)
 
+class TestAudioCheck(unittest.TestCase):
+    """`dpctl audio-check` 的两段纯逻辑：测试音格式、端点输出解析。
+
+    真机那半在 a6pro / x6pro 上跑过：端点峰值 34~35%，muted=True 时会被拦下。
+    """
+
+    def test_tone_is_48k_stereo_s16(self):
+        """厂商播放路径固定 48 kHz / 2ch / S16_LE，测试音必须同规格。"""
+        import shutil, tempfile, wave
+        from vmgui.console import harness
+        d = tempfile.mkdtemp(prefix="vm-tone-")
+        try:
+            path = os.path.join(d, "t.wav")
+            harness.DPCTL._write_tone(path, seconds=0.25)
+            w = wave.open(path, "rb")
+            try:
+                self.assertEqual(w.getnchannels(), 2)
+                self.assertEqual(w.getsampwidth(), 2)
+                self.assertEqual(w.getframerate(), 48000)
+                self.assertEqual(w.getnframes(), 12000)
+            finally:
+                w.close()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_parse_endpoint_reads_ascii_fields(self):
+        """设备名可能是中文或乱码，但 volume/muted/peak 必须照读。"""
+        from vmgui.console import harness
+        text = chr(10).join([
+            "endpoint : Speakers (Senary Audio)",
+            "volume   : 80%",
+            "muted    : False",
+            "peak max : 35.4%",
+            "",
+        ])
+        st = harness.DPCTL._parse_endpoint(text)
+        self.assertEqual(st["volume"], 80)
+        self.assertFalse(st["muted"])
+        self.assertAlmostEqual(st["peak"], 35.4, places=1)
+
+    def test_parse_endpoint_muted_true(self):
+        from vmgui.console import harness
+        text = chr(10).join(["volume   : 25%", "muted    : True", ""])
+        st = harness.DPCTL._parse_endpoint(text)
+        self.assertEqual(st["volume"], 25)
+        self.assertTrue(st["muted"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

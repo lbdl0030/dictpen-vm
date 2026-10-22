@@ -1853,6 +1853,139 @@ def grab_pen_screen(cw=0, ch=0):
     return w, h, rgb
 
 
+def _write_tone(path, seconds=1.0, rate=48000, freq=440, amp=12000):
+    """48 kHz / 2ch / S16 的测试音（厂商播放路径固定这个格式）。"""
+    import math
+    import struct
+    import wave
+
+    frames = bytearray()
+    for i in range(int(rate * seconds)):
+        v = int(amp * math.sin(2 * math.pi * freq * i / rate))
+        frames += struct.pack("<hh", v, v)
+    w = wave.open(path, "wb")
+    try:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(bytes(frames))
+    finally:
+        w.close()
+    return path
+
+
+def _parse_endpoint(text):
+    """把 scripts/audio-endpoint.ps1 的输出解析成 dict（volume/muted/peak）。"""
+    out = {}
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        key, val = line.split(":", 1)
+        key = key.strip().lower()
+        val = val.strip()
+        if key == "volume" and val.endswith("%"):
+            try:
+                out["volume"] = int(val[:-1])
+            except ValueError:
+                pass
+        elif key == "muted":
+            out["muted"] = val.lower() == "true"
+        elif key == "peak max":
+            try:
+                out["peak"] = float(val.rstrip("%"))
+            except ValueError:
+                pass
+        elif key == "endpoint":
+            out["endpoint"] = val
+    return out
+
+
+def _endpoint_probe(extra=()):
+    ps1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio-endpoint.ps1")
+    p = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                        "-File", ps1] + list(extra),
+                       capture_output=True, timeout=180)
+    raw = p.stdout + p.stderr
+    for enc in ("utf-8", "gbk"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        text = raw.decode("utf-8", "replace")
+    return p.returncode, text, _parse_endpoint(text)
+
+
+def cmd_audio_check(args):
+    """客机放一段测试音，确认它真的到达宿主默认输出。"""
+    if os.name != "nt":
+        print("audio-check: 只在 Windows 宿主上可用（端点状态走 Core Audio）")
+        return 1
+    if not vm_running():
+        print("audio-check: 虚拟机没在跑，先 dpctl up")
+        return 1
+
+    rc, text, st = _endpoint_probe()
+    if rc != 0:
+        print("audio-check: 读不到宿主默认播放设备")
+        print(text.strip()[-400:])
+        return 1
+    print("宿主端点: %s | 音量 %s%% | 静音 %s"
+          % (st.get("endpoint", "?"), st.get("volume", "?"), st.get("muted", "?")))
+    if st.get("muted") or (st.get("volume") or 0) <= 0:
+        print("失败：宿主默认播放设备静音或音量为 0，客机放什么都不会响。")
+        print("  修：powershell -NoProfile -ExecutionPolicy Bypass -File "
+              "scripts/audio-endpoint.ps1 -Unmute -SetVolume 80")
+        return 1
+
+    _rc, out = guest_run("command -v tinyplay >/dev/null 2>&1 && echo tinyplay || "
+                         "{ command -v aplay >/dev/null 2>&1 && echo aplay; } || echo none",
+                         timeout=20)
+    player = out.strip().splitlines()[-1] if out.strip() else "none"
+    if player not in ("tinyplay", "aplay"):
+        print("失败：客机里没有 tinyplay/aplay，没法做放音自检")
+        return 1
+
+    local = os.path.join(VM, "audio-check.wav")
+    _write_tone(local)
+    try:
+        rc, out = push_file(local, "/tmp/vm-audio-check.wav")
+        if rc != 0:
+            print("失败：测试音没推进客机")
+            print(out.strip()[-300:])
+            return 1
+        if player == "tinyplay":
+            play = "for i in 1 2 3 4 5; do tinyplay /tmp/vm-audio-check.wav -D 0 -d 0; done"
+        else:
+            play = "for i in 1 2 3 4 5; do aplay -q -D plughw:0,0 /tmp/vm-audio-check.wav; done"
+        guest_run("nohup sh -c %s >/tmp/vm-audio-check.log 2>&1 &" % _shq(play), timeout=20)
+
+        rc, text, st2 = _endpoint_probe(["-PeakSeconds", str(args.seconds)])
+        peak = st2.get("peak")
+        if peak is None:
+            print("audio-check: 没读到端点峰值")
+            print(text.strip()[-400:])
+            return 1
+        print("测试音: %s 播放 5 次，端点峰值 %.1f%%" % (player, peak))
+        if peak < 1.0:
+            print("失败：峰值 < 1%，声音没有到达宿主默认输出。")
+            print("  查：dpctl sh -c 'cat /tmp/vm-audio-check.log'、"
+                  "dpctl sh -c 'cat /proc/asound/cards'")
+            return 1
+        print("通过：客机放音能到宿主默认输出。")
+        return 0
+    finally:
+        if args.keep:
+            print("保留客机测试音: /tmp/vm-audio-check.wav")
+        else:
+            guest_run("rm -f /tmp/vm-audio-check.wav /tmp/vm-audio-check.log", timeout=20)
+            try:
+                os.remove(local)
+            except OSError:
+                pass
+
+
 def cmd_screenshot(args):
     w, h, rgb = grab_pen_screen(args.w, args.h)
     out = args.out
@@ -2337,6 +2470,12 @@ def main():
     p.add_argument("--model", metavar="YDP…", help="机型（YDPA7-1 等）")
     p.add_argument("--sku", metavar="OVERHEAD_…", help="SKU 字符串")
     p.set_defaults(func=cmd_sysinfo)
+
+    p = sub.add_parser("audio-check",
+                       help="客机放测试音，验证它到达宿主默认输出（端点峰值）")
+    p.add_argument("--seconds", type=float, default=8.0, help="采样窗口，默认 8s")
+    p.add_argument("--keep", action="store_true", help="保留客机里的测试音与日志")
+    p.set_defaults(func=cmd_audio_check)
 
     p = sub.add_parser("tap", help="inject a touch tap at pen-screen coords (via QMP)")
     p.add_argument("x", type=int)
