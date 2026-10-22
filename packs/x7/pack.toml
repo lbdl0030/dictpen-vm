@@ -21,6 +21,11 @@ yres     = 266
 rotation = 270
 bpp      = 32
 
+[audio]
+# 厂商播放链路按 card 序号打开设备；只有 card0 时 SoundPlayer 报
+# ALSA Invalid value for card 并立刻 stop（实测）。
+cards = 2
+
 [adapt]
 hooks       = ["patches/fixup.sh"]              # 存储 shim 安装（Q109）
 touchbridge = "patches/touchbridge.pl"         # 鼠标 -> 触摸桥（uinput）
@@ -40,6 +45,8 @@ size_mb = 8192
 # x7 的 falcon 期望 plane 格式 AR24(ARGB8888)，bochs-drm 只给 XR24(XRGB8888)；
 # 只改一条指令（0x2ca218 低半字 0x5241->0x5258），见 vm/_x7-probe/patch-fourcc.py。
 "patches/libfalcon.so" = "/usr/lib/libfalcon.so"
+# OTA 空间检查用裸 `df | grep /userdisk`；VM 里 /userdisk 与 /state 同盘，coreutils df 会去重 → 取到 0。改成按路径查。
+"patches/check_ota_space" = "/usr/bin/check_ota_space"
 # 厂商 logo 是给真机 480x960@32bpp 面板的裸帧数据（1843200 字节），falcon 启动时
 # 把整个文件 memcpy 进 framebuffer（960x266@32bpp，1021440 字节）直接越界写 -> SIGSEGV。
 # 这两份是按 VM 面板重制的裸帧（有道 logo 居中摆正），大小恰好 = pitch*height。

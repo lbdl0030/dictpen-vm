@@ -223,3 +223,14 @@ global.verifyLicense  false redo verify
 
 **验证**：手动补回 `/userdata/cfg/license`（174 B）后启动，首页立即出现；随后重启整机
 由 S00license 重新写入并走包内 shim，确认不再回激活页。
+
+## 声音与空间（2026-10-22）
+
+1. **播放点即停**：只有 `card0` 时 SoundPlayer 报
+   `ALSA lib pcm_hw.c:(_snd_pcm_hw_open) Invalid value for card` 并立即 stop。
+   `pack.toml` 加 `[audio] cards = 2` 后 `card1` 出现，可供播放链路打开。
+2. **OEM 提示“磁盘空间不足”**（系统更新）：`/usr/bin/check_ota_space` 用
+   `df | grep /userdisk` 取值；VM 里 `/userdata`、`/userdisk` 与 `/state` 是同一块
+   vdb 的 bind mount，coreutils df 按设备去重只列 `/state`，于是取到 0。
+   包内替换该脚本，改成 `df "$OTA_FILE_PATH" | awk 'NR==2{print $4*1024}'`。
+   复验：`check_ota_space 2328236618 /userdisk` → `The space meets the requirements`。

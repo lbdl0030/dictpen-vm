@@ -1,0 +1,66 @@
+#!/bin/sh
+OTA_FILE_SIZE=$1
+OTA_FILE_PATH=$2
+need_del=0
+
+del_file_userdata()
+{
+	del_list=`ls /userdata/ | grep -v DictPenData | grep -v cfg | grep -v bin | grep -v recovery | grep -v version_ota | grep -v update_ota.img`
+	for file in $del_list ; do
+		echo $file
+		rm -rf /userdata/$file
+	done
+	rm -rf /userdata/DictPenData/CapData/*
+}
+
+del_file_backup()
+{
+	mount -o remount,rw /backup
+	rm -rf /backup/*.img
+	mount -o remount,ro /backup
+}
+
+check_space()
+{
+	# VM: /userdata 与 /userdisk 是同一块盘的 bind mount，coreutils df 会按设备去重，
+# 裸 `df | grep` 取不到 /userdisk；按路径查则不受影响。
+userdata_remain_space=`df "$OTA_FILE_PATH" | awk 'NR==2{print $4*1024}'`
+    ota_img_space=`du -c /userdisk/update_ota.img*|grep total|awk '{print $1*1024}'`
+    userdata_remain_space=$(($userdata_remain_space+$ota_img_space))
+	require_space=`awk 'BEGIN{print "'"${OTA_FILE_SIZE}"'"+23*1024*1024}'`
+	if [ $userdata_remain_space -gt $require_space ]; then
+		need_del=0
+	else
+		if [ "$OTA_FILE_PATH" == "/userdata" ]; then
+			need_del=1
+		elif [ "$OTA_FILE_PATH" == "/backup" ];then
+			need_del=2
+		elif [ "$OTA_FILE_PATH" == "/userdisk" ];then
+			need_del=4
+		else
+			need_del=3
+		fi
+		echo "userdata_remain_space="$userdata_remain_space" OTA_FILE_SIZE="$OTA_FILE_SIZE" require_space="$require_space 
+	fi
+}
+
+if [ "$OTA_FILE_SIZE" == "" ]; then
+	echo "please input valid ota_file size. eg. $0 16384"
+	exit
+fi
+
+check_space
+if [ $need_del -eq 1 ];then
+	del_file_userdata
+elif [ $need_del -eq 2 ];then
+	del_file_backup
+fi
+
+check_space
+if [ $need_del -eq 0 ];then
+	echo "The space meets the requirements , successful"
+else
+	echo "The space is insufficient , failed"
+fi
+
+
