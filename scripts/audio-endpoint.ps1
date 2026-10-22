@@ -1,6 +1,6 @@
 # Read the Windows default playback endpoint state (name, mute, volume).
 # Read-only: uses Core Audio COM, no changes.
-param([switch]$Unmute, [int]$SetVolume = -1, [double]$PeakSeconds = 0)
+param([switch]$Unmute, [switch]$Mute, [int]$SetVolume = -1, [double]$PeakSeconds = 0)
 
 Add-Type -TypeDefinition @'
 using System;
@@ -105,6 +105,13 @@ public static class Endpoint {
         dev.Activate(ref iid, 1, IntPtr.Zero, out o);
         ((IAudioEndpointVolume)o).SetMasterVolumeLevelScalar(v, Guid.Empty);
     }
+    public static void MuteIt() {
+        var dev = GetDefault();
+        var iid = typeof(IAudioEndpointVolume).GUID;
+        object o;
+        dev.Activate(ref iid, 1, IntPtr.Zero, out o);
+        ((IAudioEndpointVolume)o).SetMute(true, Guid.Empty);
+    }
     public static void Unmute() {
         var dev = GetDefault();
         var iid = typeof(IAudioEndpointVolume).GUID;
@@ -133,6 +140,7 @@ $muted = [Endpoint]::Muted()
 
 if ($SetVolume -ge 0) { [Endpoint]::SetVol($SetVolume / 100.0); "set volume -> $SetVolume%" }
 if ($Unmute) { [Endpoint]::Unmute(); "set mute -> false" }
+if ($Mute) { [Endpoint]::MuteIt(); "set mute -> true" }
 if ($PeakSeconds -gt 0) {
     $max = 0.0
     $n = [int]($PeakSeconds * 20)
