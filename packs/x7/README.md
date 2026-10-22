@@ -229,12 +229,3 @@ global.verifyLicense  false redo verify
 只有 `card0` 时 SoundPlayer 报 `ALSA lib pcm_hw.c:(_snd_pcm_hw_open) Invalid value for card`
 并立即 stop（表现为“点一下就没声”）。`pack.toml` 加 `[audio] cards = 2` 后 `card1`
 出现，播放链路可以打开。
-
-## 空间提示（只记录，不修）
-
-`/usr/bin/check_ota_space` 用裸 `df | grep /userdisk` 取剩余空间；VM 里 `/userdata`、
-`/userdisk` 与 `/state` 是同一块 vdb 的 bind mount，coreutils df 按设备去重只列
-`/state`，于是取到 0 并提示“磁盘空间不足”。
-
-**这条不修**：x7 没有设备号，系统更新请求不到包，更新流程本身走不通；
-修空间识别只会让一个不可用的入口看起来可用。
