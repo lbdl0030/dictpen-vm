@@ -18,6 +18,10 @@ yres = 480
 rotation = 0
 bpp = 32
 
+[audio]                             # 厂商播放链路按 card 序号打开设备；
+cards = 2                           # 实测：只有 card0 时 SoundPlayer 报
+                                    # “Invalid value for card”，补 card1 后随身听能出声
+
 [adapt]
 battery = true
 license = true

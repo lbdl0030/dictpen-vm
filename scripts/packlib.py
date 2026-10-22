@@ -101,6 +101,9 @@ class Pack:
         # RV1106 的 falcon 输出通道序与 bochs 扫描线相反（实测 a6/a7 红蓝颠倒）。
         # 只影响宿主呈现；包内用这一位告诉 vmgui/dpctl 在帧上做 R/B 交换。
         self.swap_rb = bool(disp.get("swap_rb", False))
+        # 声卡数量：厂商播放链路按 card 序号打开设备，真机通常不止一块（codec +
+        # USB/数字耳机）。VM 默认只挂一块；应用放音需要第二块时由包声明。
+        self.audio_cards = max(1, int((data.get("audio", {}) or {}).get("cards") or 1))
         self.adapt = data.get("adapt", {})
         self.client_profile = (data.get("client", {}) or {}).get("profile", "")
         self.checks = data.get("checks", {}) or {}

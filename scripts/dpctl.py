@@ -1347,9 +1347,10 @@ def cmd_up(args):
                       "-device", "intel-hda",
                       "-device", "hda-duplex,audiodev=snd0"]
     else:
-        audio_args = ["-audiodev", audio_dev,
-                      "-device", "qemu-xhci,id=xhci",
-                      "-device", "usb-audio,bus=xhci.0,audiodev=snd0"]
+        cards = max(1, int(getattr(pack, "audio_cards", 1)))
+        audio_args = ["-audiodev", audio_dev, "-device", "qemu-xhci,id=xhci"]
+        for _ in range(cards):
+            audio_args += ["-device", "usb-audio,bus=xhci.0,audiodev=snd0"]
     cmd = [QEMU] + runtime.platform_args(pack, ctx) + audio_args + [
            "-device", "virtio-keyboard-pci",
            "-device", "virtio-tablet-pci",

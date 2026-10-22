@@ -105,6 +105,11 @@ export LANG=zh_CN.utf8
 export ALSA_LIB_ADD_GAIN=1
 /usr/bin/runSysconfigMgr >$LOG/vm-sysconfig.log 2>&1 &
 sleep 2
+# 声音服务：厂商的 SoundPlayer 是独立进程，x6pro 的 rcS 里没有它的入口
+# （实测启动后该进程不存在，app 的 playMedia 没人消费）。它按 card 序号打开
+# 设备，所以要和 pack.toml 的 [audio] cards = 2 一起用。
+setsid /usr/bin/guardian_run /usr/bin/runSoundPlayer start >$LOG/vm-soundplayer.log 2>&1 < /dev/null &
+sleep 1
 setsid /usr/bin/guardian_run /usr/bin/miniapp >$LOG/vm-miniapp.log 2>&1 < /dev/null &
 echo "x6pro: compositor + firmware app launched"
 exit 0

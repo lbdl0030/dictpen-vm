@@ -2875,5 +2875,25 @@ class TestAudioCheck(unittest.TestCase):
         self.assertTrue(st["muted"])
 
 
+class TestPackAudioCards(unittest.TestCase):
+    """`[audio].cards`：厂商播放链路按 card 序号打开设备，缺卡就报 Invalid value for card。"""
+
+    def test_default_is_one(self):
+        from scripts import packlib
+        p = packlib.Pack("t", {}, "/tmp")
+        self.assertEqual(p.audio_cards, 1)
+
+    def test_declared_value(self):
+        from scripts import packlib
+        p = packlib.Pack("t", {"audio": {"cards": 2}}, "/tmp")
+        self.assertEqual(p.audio_cards, 2)
+
+    def test_zero_or_negative_clamps_to_one(self):
+        from scripts import packlib
+        for v in (0, -3):
+            p = packlib.Pack("t", {"audio": {"cards": v}}, "/tmp")
+            self.assertEqual(p.audio_cards, 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
