@@ -22,6 +22,10 @@ yres     = 254
 rotation = 270
 bpp      = 32
 
+[audio]
+# 厂商播放链路按 card 序号打开设备（config 表要 card1）；VM 默认只挂一块。
+cards = 2
+
 [adapt]
 hooks       = ["patches/fixup.sh", "patches/vm-keys.sh"]  # 适配钩子 + 实体键三件套
                                                # arm64 dropbear、串口 shell（见该脚本）

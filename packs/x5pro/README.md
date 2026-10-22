@@ -512,3 +512,10 @@ glibc 2.23**；一旦覆盖存储符号，`loadNmtPatch` 在 `/userdisk/uresourc
   点「空间清理」后要等 2 s 再截图。
 - 这台设置包是 **1.5.2**（OS 3.4.6 自带），没有 s6pro 的 2.1.6 自动升级问题，本轮未动更新。
 - 单测：`vmgui.tests.test_units.TestX5StorageShim`。
+
+## 声音（2026-10-22）
+
+`[audio] cards = 2`：厂商播放链路按 card 序号打开设备，只有 `card0` 时
+SoundPlayer 报 ALSA `Invalid value for card`。补第二块 `usb-audio` 后
+`dpctl audio-check` 通过（端点峰值约 34.5%~34.9%）。SoundPlayer 由厂商 init
+自启，本包不需要额外脚本。随身听的 USB 上传目录是 `/userdisk/Music/`（大写 M）。

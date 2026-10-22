@@ -101,3 +101,10 @@ python scripts\dpctl.py pack import dist\a6pro.dpm
 **修法**（框架 S00wifi-ap）：`ap_max_inactivity=86400`、`skip_inactivity_poll=1`、
 `disassoc_low_ack=0`，station 侧关 `power_save`；S99wifi-link 负责选网/重连。
 a6pro 连续 7 分钟 `wpa_state=COMPLETED`、AP station 在，应用 `connect=1`。
+
+## 声音（2026-10-22）
+
+`[audio] cards = 2`：厂商播放链路按 card 序号打开设备，只有 `card0` 时
+SoundPlayer 报 ALSA `Invalid value for card`。补第二块 `usb-audio` 后
+`dpctl audio-check` 通过（端点峰值约 34.5%~34.9%）。SoundPlayer 由厂商 init
+自启，本包不需要额外脚本。随身听的 USB 上传目录是 `/userdisk/Music/`（大写 M）。

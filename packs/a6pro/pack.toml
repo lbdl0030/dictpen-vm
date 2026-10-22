@@ -28,6 +28,10 @@ bpp      = 32
 # 由 vmgui/dpctl 在宿主呈现时交换 R/B，客机帧不动。
 swap_rb  = true
 
+[audio]
+# 厂商播放链路按 card 序号打开设备（config 表要 card1）；VM 默认只挂一块。
+cards = 2
+
 [adapt]                             # 平台适配：声明了才生效
 logo        = "patches/logo.fb.gz"            # 开机 logo（写 /dev/fb0）
 touchbridge = "patches/touchbridge.pl"        # 鼠标 -> 触摸桥（uinput）

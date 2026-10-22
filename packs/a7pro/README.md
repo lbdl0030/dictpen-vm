@@ -466,3 +466,10 @@ python scripts\dpctl.py sh -c ^
 黄/橙卡、Aa 图标橙；做 R/B 互换后变成蓝卡 + 蓝 Aa，与同族 UI 一致
 （`vm/_a7_color_swapRB.png` 是离线对照）。修法同样是 `[display] swap_rb = true`，
 由 vmgui/dpctl 在宿主呈现层交换，不动客机帧。单测 `TestDisplaySwapRB`。
+
+## 声音（2026-10-22）
+
+`[audio] cards = 2`：厂商播放链路按 card 序号打开设备，只有 `card0` 时
+SoundPlayer 报 ALSA `Invalid value for card`。补第二块 `usb-audio` 后
+`dpctl audio-check` 通过（端点峰值约 34.5%~34.9%）。SoundPlayer 由厂商 init
+自启，本包不需要额外脚本。随身听的 USB 上传目录是 `/userdisk/Music/`（大写 M）。

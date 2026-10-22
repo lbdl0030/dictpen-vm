@@ -39,6 +39,10 @@ xres = 1020
 yres = 240
 rotation = 270
 
+[audio]
+# 厂商播放链路按 card 序号打开设备（config 表要 card1）；VM 默认只挂一块。
+cards = 2
+
 [adapt]
 battery     = true                  # hal-battery 读 /sys/class/power_supply（框架假电量）
 license     = true                  # 开机写开发凭证

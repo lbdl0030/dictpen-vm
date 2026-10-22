@@ -350,3 +350,10 @@ shim 里把 `_ZN28YAsyncLocalTranslatorPrivate12loadNmtPatchEv` 做成 no-op 跳
 - 设置 → 空间清理：**已使用 1.8GB/6GB**（`vm/_s7_pack_storage.png`）。
 - 设置 → 关于 → 存储容量 → 已用存储空间：同样 **1.8GB/6GB**（`vm/_s7_pack_about_storage.png`）。
 - 单测：`vmgui.tests.test_units.TestS7StorageShim`（ELF32/机器 40/三个符号/fixup 安装链）。
+
+## 声音（2026-10-22）
+
+`[audio] cards = 2`：厂商播放链路按 card 序号打开设备，只有 `card0` 时
+SoundPlayer 报 ALSA `Invalid value for card`。补第二块 `usb-audio` 后
+`dpctl audio-check` 通过（端点峰值约 34.5%~34.9%）。SoundPlayer 由厂商 init
+自启，本包不需要额外脚本。随身听的 USB 上传目录是 `/userdisk/Music/`（大写 M）。

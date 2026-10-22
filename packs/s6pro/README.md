@@ -233,3 +233,10 @@ python scripts\dpctl.py sh -c "miniapp_cli install /etc/miniapp/resources/preset
 - 从卡片内部上拖才滚得动设置列表（从两列之间的空隙拖会回桌面）；
   下拉菜单 → 齿轮 才是设置入口（桌面无设置卡片）。
 - 单测：`vmgui.tests.test_units.TestS6StorageShim`。
+
+## 声音（2026-10-22）
+
+`[audio] cards = 2`：厂商播放链路按 card 序号打开设备，只有 `card0` 时
+SoundPlayer 报 ALSA `Invalid value for card`。补第二块 `usb-audio` 后
+`dpctl audio-check` 通过（端点峰值约 34.5%~34.9%）。SoundPlayer 由厂商 init
+自启，本包不需要额外脚本。随身听的 USB 上传目录是 `/userdisk/Music/`（大写 M）。
