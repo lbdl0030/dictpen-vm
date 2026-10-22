@@ -59,7 +59,7 @@ extra       = ["patches/dropbear-tree",       # fixup 素材：Debian arm64 drop
                "patches/perl-tree",          # fixup 素材：Debian armhf perl-base（触摸桥运行时）
                "patches/vm-keys.pl", "patches/vm-keys-apply", "patches/vm-keys.env"]
 
-[adapt.replace]                     # 开机把包里的文件覆盖到 guest 根的指定位置
+[adapt.replace]
 # 原版从 /proc/device-tree/model 读板型；VM 里是 QEMU 的 model，所有分支都不匹配，
 # S50-app-launcher 因此不拉 UI 栈。这里报告本机对应分支（证据见 README）。
 "patches/get_pcba_version.sh" = "/usr/bin/get_pcba_version"

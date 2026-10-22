@@ -44,7 +44,7 @@ extra       = ["patches/perl-tree",            # fixup 素材：Debian armhf per
 # 实测点击落在 app 内部光标的旧位置上（vm/x5-tap2.png 无反应）；桥把 tablet 重发布
 # 成 BTN_TOUCH+ABS 的真触摸屏后，tap 位置正确。
 
-[adapt.replace]                                # 覆盖 guest 文件
+[adapt.replace]
 "patches/get_pcba_version.sh"  = "/usr/bin/get_pcba_version"
 "patches/noop_update_engine.sh" = "/usr/bin/update_engine"
 "patches/runDictPen.sh"        = "/usr/bin/runDictPen"
