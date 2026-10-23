@@ -4,7 +4,7 @@
 面板 960×266。只有一份 `x7-system_a.img`（2.5 GiB erofs），**没有 boot 镜像**——框架
 也确实不需要它（runtime 从不读 boot，`packlib` 只把 rootfs 当必需文件）。
 
-> 镜像就在包内 `images/x7-system_a.img`（路径相对包目录）；`D:\download\x7-system_a.img`
+> 镜像就在包内 `images/x7-system_a.img`（路径相对包目录）；下载目录里的 `x7-system_a.img`
 > 是最初的下载件，包不依赖它。
 
 ## 现状（2026-10-03 更新）

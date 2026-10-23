@@ -234,7 +234,7 @@ class TestConsoleWindow(unittest.TestCase):
         两条禁令：不许写"清除数据"这类抽象词；不许承诺可恢复。作用域必须写"只这一台"。
         """
         from vmgui.console.window import fresh_warning_text
-        txt = fresh_warning_text("a6pro", r"D:\download\vm\vm\state-a6pro.img", 512 * 1024 * 1024)
+        txt = fresh_warning_text("a6pro", r"D:\vm\state-a6pro.img", 512 * 1024 * 1024)
         self.assertIn("state-a6pro.img", txt)
         self.assertIn("512 MiB", txt)
         self.assertIn("只影响这一台", txt)
@@ -1181,8 +1181,8 @@ class TestFileTransfer(unittest.TestCase):
         留档说明和回执就跟人对不上账。
         """
         from vmgui.console.window import amr_target
-        self.assertEqual(amr_target(r"D:\download\vm\包 A.amr"), "/userdata/包 A.amr")
-        self.assertEqual(amr_target("D:/download/vm/包 A.amr"), "/userdata/包 A.amr")
+        self.assertEqual(amr_target(r"D:\vm\包 A.amr"), "/userdata/包 A.amr")
+        self.assertEqual(amr_target("D:/vm/包 A.amr"), "/userdata/包 A.amr")
         self.assertEqual(amr_target(r"C:\x\y\miniapp.amr"), "/userdata/miniapp.amr")
 
     def test_install_quotes_the_remote_path_and_returns_the_command(self):
