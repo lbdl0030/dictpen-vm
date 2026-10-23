@@ -6,11 +6,23 @@
 
 ## 最快上手
 
+**第一次用，先下载**（之后每次只要第 4 步）。`bootstrap.py` 下的是 QEMU、通用内核与
+initramfs 工具链，以及**五台有上游镜像的固件**（a6pro / a7pro / s6pro / s7pro / x5pro）。
+固件按包分开、都标 optional，`python scripts\bootstrap.py --only firmware-x5pro` 只取一台；
+**x6pro 与 x7 上游没有现成镜像**，要从各自的 OTA 包提取，步骤见
+[docs/发布说明.md](docs/发布说明.md) §3。
+
 ```bat
-:: 第一次：取依赖与固件镜像（只做一次，约 4GB）
+:: 1) 拿到仓库：clone，或从 GitHub Releases 下载 dictpen-vm-<版本>.zip 解压
+git clone https://github.com/penosext/dictpen-vm.git
+
+:: 2) 补齐依赖与固件镜像（只做一次，约 4GB；先加 --check 可以只看缺什么）
 python scripts\bootstrap.py
 
-:: 打开控制台，点工具条上的「启动」
+:: 3) 控制台要 PySide6（只用命令行可以跳过）
+python -m pip install PySide6
+
+:: 4) 打开控制台，点工具条上的「启动」
 vm-console.cmd
 ```
 
