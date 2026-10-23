@@ -1,54 +1,61 @@
 # dictpen-vm — 有道词典笔实机模拟开发环境
 
-在 Windows（无需管理员权限、无需 WSL）上用 QEMU 运行**词典笔真实固件**的虚拟机。
+在 Windows 上用 QEMU 运行**词典笔真实固件**的虚拟机（不需要管理员权限，也不需要 WSL）。
+框架本身不含固件：一台机器会变的东西全在 `packs/<名字>/` 里，启动时用 `--pack` 选一台。
+仓库自带七个包：**a6pro / a7pro / s6pro / s7pro / x5pro / x6pro / x7**。
 
-**虚拟机是一个框架，固件是可拆卸的包。** 框架本身不含任何机型信息（镜像、面板尺寸、
-显示 HAL 补丁…一律没有）；一台机器的全部会变的东西放在 `packs/<名字>/` 里，启动时用
-`dpctl up --pack <名字>` 挑一个。仓库自带七个固件包：**a6pro / a7pro / s6pro / s7pro /
-x5pro / x6pro / x7**，覆盖 Rockchip RV1106、CVITEK CV1826、RK3562 三个平台；各包的
-固件版本、面板与适配边界见各自的 `packs/<名字>/README.md` 或 `DEVLOG.md`。
+## 最快上手
+
+```bat
+:: 第一次：取依赖与固件镜像（只做一次，约 4GB）
+python scripts\bootstrap.py
+
+:: 打开控制台，点工具条上的「启动」
+vm-console.cmd
+```
+
+控制台就是「笔的屏幕 + 状态栏 + 抽屉」：工具条下拉换机型，抽屉里有串口 / 应用 / 命令 /
+文件 / 配置 / 蓝牙 / 声音。不想开窗口也可以全走命令行：
+
+```bat
+python scripts\dpctl.py up --pack s7pro    :: 起机（--pack 选机型）
+python scripts\dpctl.py status             :: 看状态
+python scripts\dpctl.py down               :: 关机
+```
+
+只想看笔的屏幕：`run-vm.cmd` 会弹出画面窗口（等价 `dpctl up`，默认显示前端是 vmgui）。
+
+## 常用命令
+
+| 命令 | 一句话 |
+|---|---|
+| `dpctl packs [名字]` | 列出七个包：镜像在不在、MD5 对不对 |
+| `dpctl up --pack <名>` | 起一台机器；`--fresh` 清空状态盘、`--fast` 用快照约 6 秒回首页、`--display none` 不开窗 |
+| `dpctl down` / `status` | 关机 / 看状态（`run-vm.cmd` 起的也认） |
+| `dpctl console` | 打开控制台窗口（等价双击 `vm-console.cmd`） |
+| `dpctl wait --adb` | 等笔起来，顺带把 adb 连上 |
+| `dpctl sh -c "id"` | 在笔里跑一条命令（返回真实退出码） |
+| `dpctl shell` | 进笔的命令行（root@127.0.0.1:2222） |
+| `dpctl put 本地 远端` / `get 远端 本地` | 传文件进出 |
+| `dpctl screenshot --out x.png` | 截笔的屏幕 |
+| `dpctl tap X Y` | 在笔屏上点一下（坐标按包声明的面板换算） |
+| `dpctl fast save` / `up --fast` | 存 / 用首页快照（约 6 秒；快照不含声音） |
+| `dpctl adb shell` | 电脑端 adb 调试（自动 connect） |
+
+完整参数用 `python scripts\dpctl.py <子命令> --help`。三条最容易踩的：**控制台占着 QMP**，
+它开着时 `dpctl tap` 会被拒（先 `up --display none`）；**`dpctl down` 不会关控制台窗口**；
+**快速启动没有声音**（usb-audio 不可迁移）。
 
 ## 文档
 
-| 文档 | 给谁看 | 内容 |
-|------|--------|------|
-| [docs/使用手册.md](docs/使用手册.md) | 想用起来的人 | 重建依赖、取固件、选包启动、看画面与操作、传文件/adb、持久化、虚拟硬件、激活 |
-| [docs/固件包开发教程.md](docs/固件包开发教程.md) | 要加一台机器的人 | 三个概念、`pack.toml` 全字段、声明式/命令式适配、写 runtime、调试与检查清单 |
-| [docs/插件模型.md](docs/插件模型.md) | **要改框架 / 写插件的人** | 宿主与四个插件点、决策树、包/runtime/适配/显示接口契约、零机型自检、接口变更纪律 |
-| [docs/疑难排查.md](docs/疑难排查.md) | 卡住的人 | 按现象分类的排查：黑屏/花屏、触摸不响应、联网误判、首启、激活、SSH/adb |
-| [docs/固件能力盘点.md](docs/固件能力盘点.md) | 要补 miniapp 设备能力的人 | a6pro 固件目录/服务/设备契约与 VM 缺口（存储、音频、亮度、vendor_storage 等），只做分析 |
-| [docs/发布说明.md](docs/发布说明.md) | 要安装/升级的人 | 当前版本更新、四步安装、镜像下载与命名、已知问题、升级说明 |
-| [.trae/documents/firmware-packs-design.md](.trae/documents/firmware-packs-design.md) | （**历史设计文档**） | 早期设计：包格式、runtime 接口、换包机制、迁移阶段与验收判据 |
-| [.trae/documents/vmgui-design.md](.trae/documents/vmgui-design.md) | 想改显示前端的人 | vmgui 的配置 schema、适配层接口、模块划分与测试计划 |
-| 本文件 | 第一次来的人 | 是什么、快速上手、能力表、`dpctl` 命令、目录结构、引导机制、换机型、分发重建 |
-
-## 快速开始
-
-```bat
-python scripts\dpctl.py packs          :: 有哪些固件包、镜像是否就位
-python scripts\dpctl.py up --pack a6pro  :: 启动 VM（vmgui 画面 + 持久化状态盘）
-python scripts\dpctl.py wait --adb     :: 等实机就绪，并连通 adb
-python scripts\dpctl.py shell          :: 进实机命令行（可直接 dpctl shell）
-python scripts\dpctl.py sh -c "id"     :: 跑单条命令，返回真实退出码
-python scripts\dpctl.py put a.txt /userdata/a.txt   :: 传文件进实机
-python scripts\dpctl.py get /userdata/a.txt a.txt   :: 取文件到电脑
-python scripts\dpctl.py adb shell      :: 电脑端 adb 调试（自动 connect）
-python scripts\dpctl.py status         :: 查看 VM / 端口 / adb 状态
-python scripts\dpctl.py down           :: 关闭虚拟机
-python scripts\dpctl.py console        :: 打开词典笔控制台窗口（也可双击 vm-console.cmd）
-```
-
-也可以继续用原始脚本：
-
-```bat
-vm-console.cmd      :: 打开词典笔控制台（设备画面 + 状态栏 + 抽屉），等价于 dpctl console
-run-vm.cmd          :: 启动虚拟机（弹出 GTK 显示窗口，即"词典笔画面"）
-ssh-vm.cmd          :: 新开窗口，root@127.0.0.1 -p 2222 登录实机系统
-console.cmd         :: 串口控制台（看启动过程/调试，Ctrl+] 退出）
-stop-vm.cmd         :: 关闭虚拟机
-```
-
-> `dpctl` 与 `run-vm.cmd` 等价，但会额外管理持久化状态盘与 pid、并在恢复重启后仍能识别 VM 进程。
+| 文档 | 给谁看 |
+|---|---|
+| [docs/使用手册.md](docs/使用手册.md) | 想用起来：依赖、固件、启动、看画面与操作、传文件、adb、持久化、虚拟硬件、激活 |
+| [docs/固件包开发教程.md](docs/固件包开发教程.md) | 想加一台机器：`pack.toml` 全字段、适配方式、写 runtime、检查清单 |
+| [docs/插件模型.md](docs/插件模型.md) | 想改框架 / 写插件：宿主与四个插件点、接口契约、零机型自检 |
+| [docs/疑难排查.md](docs/疑难排查.md) | 卡住了：黑屏花屏、触摸、联网、首启、激活、SSH/adb |
+| [docs/固件能力盘点.md](docs/固件能力盘点.md) | 想补 miniapp 设备能力：各机型固件契约与 VM 缺口 |
+| [docs/发布说明.md](docs/发布说明.md) | 安装 / 升级：本次更新、四步安装、镜像命名、已知问题 |
 
 ## 已验证能力
 
@@ -76,27 +83,7 @@ stop-vm.cmd         :: 关闭虚拟机
 
 ## 开发与调试（dpctl）
 
-`scripts/dpctl.py` 是本项目的开发入口，覆盖"启动 → 进系统 → 传文件 → 跑命令/用 adb 调试"的闭环：
-
-| 子命令 | 说明 |
-|--------|------|
-| `packs [NAME]` | 列出固件包（runtime / soc / 面板 / 镜像是否就位）；给 NAME 时打印该包解析后的全部路径、补丁列表并核对 `[checks]` 的 MD5 |
-| `up [--pack NAME] [--fresh] [--fast] [--headless] [--display vmgui\|gtk\|none] [--rescue] [--dev] [--pointer\|--no-pointer] [--license\|--no-license]` | 启动 VM；**用哪个固件由 `--pack` 决定**（`packs/<名>/pack.toml`，只装了一个包时可省略）。`--fresh` 清空该包的状态盘重来，`--headless` 不开窗口；`--display` 选显示前端（默认 `vmgui`：QEMU `-display none` + 客户端走 QMP；`gtk` 回退；`none` 不要窗口）；`--rescue` 直接进串口 root shell（不启 pen 的 init，用于修坏掉的 `/userdata`）；`--dev` 保留 miniapp launcher；GTK 窗口下默认调出触控反馈指针（`--no-pointer` 关掉），默认开机尝试恢复激活凭证（`--no-license` 关掉） |
-| `fast save [--pack NAME] [--force]` / `fast status` | 建立/查看快速启动快照：把**普通**状态盘复制到 `vm/fast-<包>.qcow2`，无音频冷启动到首页后 `savevm ready`。恢复用 `up --fast`（约 6 s；无声音）；与普通状态盘互相独立 |
-| `console [--pack NAME]` | **打开词典笔控制台窗口**（`vmgui --console`，即 `vm-console.cmd` 双击的那件事）。只负责"起进程 + 记账"：解释器由 `find_pyside_python()` 一处决定；已有一个控制台在跑（读 `vm/console.pid`）或 QMP `tcp:4446` 被别人占着时**直接拒绝**，因为 QMP 只服务一个客户端——想让控制台独占画面，用 `dpctl up --display none`。窗口起来后 stdout/stderr 落 `vm/console.out`。**关掉它只有关窗口那颗键**：`dpctl down` **故意不收控制台**（#70，管理器不该被"关机"顺手关掉），虚拟机停止后显示「虚拟机未运行」。`--pack` 只定**初始**目标，之后换台在窗口里：工具条那颗「设备 x5pro」下拉一台一行、当前那台打勾，缺少镜像的灰显不可选（#28）；虚拟机运行中选择另一台会先确认，同意后**仅关闭，不自动启动**（措辞见 `vm/ui-council/31-console-copy.md` §20）。键盘：**F11 全屏 / Esc 退出全屏**（全屏的是窗口，工具条与抽屉都还在；画面按「适合」跟着放大、不裁不拉伸），Tab 收/开抽屉；工具条另有 **快速启动 / 保存快照**：保存快照需先关机（约 1.5–2 分钟，无音频启动一次），之后「快速启动」约 6 s 恢复首页；普通「启动」仍是有声音的冷启动（见台账 Q93）。工具条还有实体键 **Home / 音量－ / 音量＋**（按包映射 Home 码：s6/x5=139、其余=102；音量只有 x6pro；x7 无键，见台账 Q92） |
-| `pack export NAME [-o FILE]` / `pack import FILE [--force]` | 把整个固件包打成单个 `.dpm`（tar.gz）带走 / 装回来 |
-| `down` / `status` | 关闭 / 查看状态（即使 VM 是 `run-vm.cmd` 起的也能识别） |
-| `wait [--timeout N] [--adb]` | 等实机 shell 就绪；`--adb` 同时拉起并等待 adb |
-| `sh -c CMD [--timeout N] [--serial]` | 实机内执行命令并返回**真实退出码**；SSH 未起来时自动回落串口 |
-| `shell` | 交互式实机命令行（SSH） |
-| `put LOCAL REMOTE` / `get REMOTE LOCAL` | 传文件（优先 adb push/pull，未连 adb 时走 SSH） |
-| `adb [ARGS...]` | 电脑端 adb：自动确保 guest `adbd` 在跑并 `adb connect`，随后透传参数，如 `adb shell`、`adb logcat`、`adb push` |
-| `view [--w N --h N] [--zoom N]` | **直接输出词典笔画面**：开一个按笔分辨率定尺寸的窗口，实时显示笔的 GUI（默认可读性放大 2×）；不指定 `--w/--h` 时用当前包的面板尺寸 |
-| `pointer` | **触控反馈指针**：在 QEMU 窗口上贴一层透明、可点穿的置顶覆盖层，鼠标位置画一个圈（按下变色变大），让"笔屏的手指在哪"看得见（仅 Windows 宿主）。`dpctl up` 开窗口时会**自动调出**，`--no-pointer` 关闭 |
-| `nopointer` | 把上面那个覆盖层收掉（`up` 之后想中途隐藏时用） |
-| `license` | 在实机里跑一次激活凭证恢复（`scripts/restore_license.sh`），见"激活与凭证恢复" |
-| `screenshot [--out FILE] [--zoom N]` | 把笔的 GUI 存成 PNG（默认 `vm/screen.png`；裁剪尺寸默认取当前包的面板尺寸） |
-| `tap X Y [--w N --h N]` | 在笔屏坐标注入一次触摸（默认用当前包的面板尺寸换算） |
+`dpctl` 覆盖「启动 → 进系统 → 传文件 → 调试」的闭环，常用命令见上面的表；完整参数用 `--help`，场景化说明见 [docs/使用手册.md](docs/使用手册.md)。
 
 ### 端口
 
@@ -287,8 +274,6 @@ python scripts\dpctl.py sh -c "cat /sys/class/power_supply/battery/capacity"
 | `scripts/mitm-verify.py` | 宿主侧假 verify 服务（443 + 自签证书），用于离线复现激活链路 |
 | `vm/mitm/` | 假服务的自签证书与请求日志（`cert.pem`/`key.pem`/`requests.log`） |
 | `vmgui/` | **QEMU 虚拟机客户端 GUI**（PySide6）：配置化、分辨率自适应、多显示模式、输入映射；`vmgui/profiles/*.toml` 是机型/固件 profile（见"用 vmgui 客户端"） |
-| `.trae/documents/firmware-packs-design.md` | 固件包（框架/固件分离）的设计文档 |
-| `.trae/documents/vmgui-design.md` | vmgui 的设计文档（配置 schema、适配层接口、模块划分、测试计划与验收） |
 | `vm/state-<包>.img` | 持久化状态盘（ext4，512M，按包分，`--fresh` 可重建） |
 | `vm/initrd-<包>.cpio.gz` | 本次启动用的 initrd（通用 initramfs + 包内容），按哈希缓存，换包/改包才重建 |
 | `vm/` | 运行期产物（serial.log、qemu.log、截屏、pid） |
@@ -397,7 +382,6 @@ py -3.13 -m vmgui --fullscreen --pointer-mode absolute
 - 自测：`py -3.13 -m unittest discover -s vmgui\tests -t .`（配置合并/坐标逆变换/缩放/键映射），
   `py -3.13 vmgui\tests\smoke_live.py --tap 280 85`（连真机取帧、按各模式离屏渲染成 PNG、注入点击）。
 
-设计文档（配置 schema、适配层接口、模块划分、测试与验收）见 `.trae/documents/vmgui-design.md`。
 
 > **QMP 同时只能有一个客户端，而且别去"探"它**：vmgui 在前台时会一直占着 4446，此时
 > `dpctl tap` 会连不上（QEMU 的 socket chardev 只服务一个客户端）。更要紧的是**不要用
