@@ -170,6 +170,26 @@ class TestConsoleWindow(unittest.TestCase):
         self.addCleanup(win.deleteLater)
         return win
 
+    def test_pack_switch_follows_swap_rb(self):
+        """换目标之后颜色通道要跟着换：a6pro/a7pro 是 swap_rb，切走/切进都不能沿用旧值。
+
+        2026-10-22 人报「抽屉快速切换，部分型号画面不对，a 系列颜色问题又出现了」——
+        根因是 `Session.swap_rb` 只在 `start()` 里问一次包，之后换了目标没人再问。
+        """
+        import types
+        from vmgui.console import harness as H
+        self.assertTrue(H.swap_rb("a6pro"))
+        self.assertTrue(H.swap_rb("a7pro"))
+        self.assertFalse(H.swap_rb("s7pro"))
+        win = self._window(pack="s7pro")
+        win.session.backend = types.SimpleNamespace(swap_rb=False)   # 假装已连上
+        win._apply_pack("a6pro", announce=False)
+        self.assertTrue(win.session.swap_rb)
+        self.assertTrue(win.session.backend.swap_rb, "已连上的后端也要跟着换")
+        win._apply_pack("s7pro", announce=False)
+        self.assertFalse(win.session.swap_rb)
+        self.assertFalse(win.session.backend.swap_rb)
+
     def test_wrap_hard_breaks_unbreakable_lines(self):
         """Q48：没有空格的 4111 字符行要能被**硬折**（QLabel 的 wordWrap 对它无效）。"""
         from vmgui.console.window import TAIL_LINE_MAX, _wrap_hard
@@ -2449,6 +2469,36 @@ class TestSndReport(unittest.TestCase):
         self.assertTrue(rep["absent"], "没声卡要写「快速启动没有音频」，不是「出错」")
 
 
+class TestConsoleSndVolumeCard(unittest.TestCase):
+    """声音页读写哪张卡由包声明（s7pro 的输出设备是 card2，写死 card0 会"滑杆动了值不动"）。"""
+
+    def test_volume_card_comes_from_pack(self):
+        from vmgui.console import harness as H
+        from vmgui.console.window import snd_report_cmd
+        self.assertEqual(H.volume_card("s7pro"), 2)
+        self.assertEqual(H.volume_card("x6pro"), 0, "没声明的包按 card0")
+        self.assertEqual(H.volume_card(None), 0)
+        self.assertEqual(H.volume_card("no-such-pack"), 0)
+        self.assertIn("amixer -c 2 sget 'Audio Output Volume Control'",
+                      snd_report_cmd(H.volume_card("s7pro")))
+
+    def test_volume_card_clamped_to_declared_cards(self):
+        """声明超出 `[audio].cards` 时收到最大合法卡号，别往不存在的卡上发命令。"""
+        import tempfile
+        from vmgui.console import harness as H
+        with tempfile.TemporaryDirectory() as td:
+            os.makedirs(os.path.join(td, "packs", "tmp1"))
+            with open(os.path.join(td, "packs", "tmp1", "pack.toml"), "w",
+                      encoding="utf-8") as f:
+                f.write('[audio]\ncards = 1\nvolume_card = 4\n')
+            real = H.ROOT
+            try:
+                H.ROOT = td
+                self.assertEqual(H.volume_card("tmp1"), 0)
+            finally:
+                H.ROOT = real
+
+
 class TestConsoleSndCancel(unittest.TestCase):
     """声音页：新操作顶掉上一条；旧回执作废；没声卡时指向快速启动。"""
 
@@ -2622,14 +2672,32 @@ class TestS7StorageShim(unittest.TestCase):
         self.assertIn('statvfs("/userdata"', src)
         self.assertIn('\\"totalSpace\\"', src)
 
+    def test_appfix_exports_ws_and_license_bypasses(self):
+        """家长控制 WS 桩与 verifyLicense 恒真必须在同一份 armhf preload 里。"""
+        import struct
+        b = (self._root() / "packs/s7pro/patches/libvmappfix-armhf.so").read_bytes()
+        self.assertEqual(b[4], 1, "ELF32：s7pro 的 app 是 armhf")
+        self.assertEqual(struct.unpack_from("<H", b, 0x12)[0], 40, "必须是 ARM")
+        for name in (
+                b"_ZN7YDALAPI21YParentControlPrivate13connectServerEv",
+                b"_ZN11YADAPTERAPI18YSystemInfoAdapter13verifyLicenseERKNSt7__cxx11"
+                b"12basic_stringIcSt11char_traitsIcESaIcEEE",
+                b"_ZN11YADAPTERAPI8Internal25YSystemInfoAdapterPrivate13verifyLicense"
+                b"ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"):
+            self.assertIn(name, b)
+        self.assertIn(b"libc.so.6", b)
+
     def test_pack_installs_shim_via_fixup_not_only_replace(self):
         root = self._root()
         fixup = (root / "packs/s7pro/patches/fixup.sh").read_text(encoding="utf-8")
         self.assertIn("/patches/libvmstorage-armhf.so", fixup)
         self.assertIn('"$TARGET/usr/lib/libvmstorage-armhf.so"', fixup)
         self.assertIn("/patches/miniapp-wrapper.sh", fixup)
+        self.assertIn("/patches/libvmappfix-armhf.so", fixup)
+        self.assertIn('"$TARGET/usr/lib/libvmappfix-armhf.so"', fixup)
         wrapper = (root / "packs/s7pro/patches/miniapp-wrapper.sh").read_text(encoding="utf-8")
-        self.assertIn("LD_PRELOAD=/usr/lib/libvmstorage-armhf.so", wrapper)
+        self.assertIn('LD_PRELOAD="/usr/lib/libvmstorage-armhf.so '
+                      '/usr/lib/libvmappfix-armhf.so"', wrapper)
         self.assertIn("/usr/bin/miniapp.real", wrapper)
         run = (root / "packs/s7pro/patches/runDictPen.sh").read_text(encoding="utf-8")
         self.assertIn("/usr/lib/miniapp-wrapper.sh", run)
@@ -2637,6 +2705,7 @@ class TestS7StorageShim(unittest.TestCase):
         toml = (root / "packs/s7pro/pack.toml").read_text(encoding="utf-8")
         self.assertIn("patches/libvmstorage-armhf.so", toml)
         self.assertIn("patches/miniapp-wrapper.sh", toml)
+        self.assertIn("patches/libvmappfix-armhf.so", toml)
 
 
 class TestS6StorageShim(unittest.TestCase):

@@ -1827,14 +1827,22 @@ def _swap_rb(rgb: bytes) -> bytes:
     return bytes(b)
 
 
-def _pack_swap_rb() -> bool:
-    name = current_pack_name()
+def swap_rb_for(name):
+    """这台机型的固件要不要在宿主侧交换 R/B（[display].swap_rb）。
+
+    帧是逐帧取的，控制台换目标时**必须重新问一次**——启动时问一次、之后一直用那个答案，
+    从 a6pro/a7pro 切到别的机型（或反过来）就是整屏颜色颠倒。
+    """
     if not name:
         return False
     try:
         return bool(packlib.load_pack(name).swap_rb)
     except PackError:
         return False
+
+
+def _pack_swap_rb() -> bool:
+    return swap_rb_for(current_pack_name())
 
 
 def grab_pen_screen(cw=0, ch=0):

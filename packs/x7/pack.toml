@@ -22,8 +22,9 @@ rotation = 270
 bpp      = 32
 
 [audio]
-# 厂商播放链路按 card 序号打开设备；只有 card0 时 SoundPlayer 报
-# ALSA Invalid value for card 并立刻 stop（实测）。
+# 本机板型（/etc/hostname=Orange-3562）的音频配置是 speaker=card0、
+# 数字耳机=card1；只有 card0 时 SoundPlayer 的 YAudioOutput 初始化失败，
+# 应用放音点即停（实测）。
 cards = 2
 
 [adapt]
@@ -55,3 +56,14 @@ size_mb = 8192
 # fixup.sh 做。
 "patches/libvmstorage.so" = "/usr/lib/vmstorage/libvmstorage.so"
 "patches/miniapp-wrapper.sh" = "/usr/lib/miniapp-wrapper.sh"
+# 音频 HAL 的板型键来自 DTS（不是 /usr/bin/get_pcba_version）：VM 里
+# model=linux,dummy-virt，查询键是 "unkown_V?"，原配置没有这一节 ->
+# youdao_hal_config_get 返回空 -> SoundPlayer 的 m_audioModule->init() 失败、
+# 放音点即停。这里补一节，内容取镜像自己的 RK3562_Orange_V0（speaker card0、
+# 数字耳机 card1），其余 28 节原样保留。
+"patches/youdao_hal_audio_config.json" = "/usr/configs/youdao_hal_audio_config.json"
+# 数字耳机在 HAL 里按 ALSA 别名 "tc_digital" 打开；真机由 S01systeminit 的
+# Orange 分支 bind /etc/asound.conf.VOrange-dvt 提供，VM 的 mixer 控件数不足
+# 48，那个后台循环永远不 bind。这里直接给 /etc/asound.conf 补同样的别名
+# （tc_digital / dhs_hwplug -> plughw:1,0），其余保持镜像原值。
+"patches/asound.conf" = "/etc/asound.conf"

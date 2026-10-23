@@ -291,9 +291,16 @@ BT_SCAN_CMD = "btmgmt --timeout 8 find 2>&1 | tail -20"
 
 
 # 声音页：只读两处 —— 声卡清单与那颗 mixer 控件；控件名是 QEMU USB Audio 报的原文。
+# 卡号不写死：厂商 HAL 把音量写到哪张卡由包声明（`[audio].volume_card`），盯错卡就是
+# "滑杆动了、值不动"（s7pro 在 card2，见 harness.volume_card 的注释）。
 SND_CTL = "Audio Output Volume Control"
-SND_REPORT_CMD = ("echo @@cards; cat /proc/asound/cards 2>&1 | head -8; "
-                  "echo @@mix; amixer -c 0 sget '" + SND_CTL + "' 2>&1 | head -8")
+
+
+def snd_report_cmd(card: int) -> str:
+    return ("echo @@cards; cat /proc/asound/cards 2>&1 | head -8; "
+            "echo @@mix; amixer -c %d sget '%s' 2>&1 | head -8" % (card, SND_CTL))
+
+
 SND_TONE = "/tmp/vm-tone.wav"
 
 
@@ -404,6 +411,9 @@ class ConsoleWindow(QMainWindow):
         self.cfg = cfg
         self.session = session
         self.pack = pack or harness.current_pack()
+        # 开局就把颜色通道对齐到这台（`__main__` 也设了一次，但窗口可以带着
+        # 与 args 不同的 pack 构造 —— 两个值不许各说各话）。
+        session.set_swap_rb(harness.swap_rb(self.pack))
         self.keymap = KeyMapper(cfg.get("input.keymap"))
         self._pointer_mode = "absolute"
         self._decision: Optional[R.Decision] = None
@@ -749,6 +759,9 @@ class ConsoleWindow(QMainWindow):
         """
         self.pack = name
         self._pending_pack = ""
+        # 颜色通道是按包算的，而帧是逐帧取的：`Session.start()` 里只问一次，
+        # 从 a6pro/a7pro 切走（或切进来）就会整屏 R/B 反着显示（2026-10-22 实测）。
+        self.session.set_swap_rb(harness.swap_rb(name))
         self._set_title()
         # 画面上的一切都**属于旧那台**：最后一帧、缩放档、被拖过的窗口形状。换目标还留着它们，
         # 人看到的就是"新设备名字下挂着旧机器的画面"（再叠上旧面板的裁切线，像是被裁/错位）。
@@ -1424,13 +1437,13 @@ class ConsoleWindow(QMainWindow):
         self._snd_buttons = []
         for text, tip, slot in (
                 ("刷新", "读声卡与音量（amixer；不占 QMP）",
-                 lambda: self._snd_run("refresh", SND_REPORT_CMD, 30)),
+                 lambda: self._snd_run("refresh", snd_report_cmd(self._snd_card()), 30)),
                 ("测一下", "把 1 秒 440 Hz 放进客机再播 —— 宿主喇叭应该听到一声嘀；"
                            "播放中选其他操作会中断它", self._snd_test),
                 ("静音", "amixer sset ... mute",
-                 lambda: self._snd_run("mute", "amixer -c 0 sset '" + SND_CTL + "' mute 2>&1")),
+                 lambda: self._snd_run("mute", "amixer -c %d sset '" % self._snd_card() + SND_CTL + "' mute 2>&1")),
                 ("取消静音", "amixer sset ... unmute",
-                 lambda: self._snd_run("unmute", "amixer -c 0 sset '" + SND_CTL + "' unmute 2>&1"))):
+                 lambda: self._snd_run("unmute", "amixer -c %d sset '" % self._snd_card() + SND_CTL + "' unmute 2>&1"))):
             b = QPushButton(text)
             b.setToolTip(tip)
             b.clicked.connect(slot)
@@ -1491,7 +1504,7 @@ class ConsoleWindow(QMainWindow):
         if rc != 0:
             self.lbl_snd.setText(f"{what} 没成（rc={rc}）—— 看下面那格")
             return
-        self._snd_run("refresh", SND_REPORT_CMD, 30)   # 改完自动再读一遍
+        self._snd_run("refresh", snd_report_cmd(self._snd_card()), 30)   # 改完自动再读一遍
 
     def _snd_render(self, rep: dict) -> None:
         if rep["absent"]:
@@ -1551,8 +1564,12 @@ class ConsoleWindow(QMainWindow):
     def _snd_show(self, text: str) -> None:
         self.lbl_snd.setText(text)
 
+    def _snd_card(self) -> int:
+        """音量控件在哪张卡：包说的算，没说就是 card0。"""
+        return harness.volume_card(self.pack)
+
     def _snd_volume(self, pct: int) -> None:
-        self._snd_run("vol", "amixer -c 0 sset '" + SND_CTL + "' %d%% 2>&1" % pct)
+        self._snd_run("vol", "amixer -c %d sset '" % self._snd_card() + SND_CTL + "' %d%% 2>&1" % pct)
 
     def _refresh_machine(self, ask_guest: bool = True) -> None:
         """宿主侧那几格在 UI 线程读（一份小 toml + 一次 `getsize`，毫秒级）；

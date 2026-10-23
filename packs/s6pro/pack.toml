@@ -45,8 +45,14 @@ rotation = 270
 bpp      = 32
 
 [audio]
-# 厂商播放链路按 card 序号打开设备（config 表要 card1）；VM 默认只挂一块。
-cards = 2
+# Plum_V0 的音频配置：mic=card1、speaker=card2、数字耳机=card3。
+# 只挂 2 块卡时应用放音走 speaker，HAL 打开 hw:2,0 报 No such file，
+# SoundPlayer 立刻 stop（点即停）；补到 4 块卡后应用内播放出声（宿主峰值 85.3%）。
+cards = 4
+# 音量落哪张卡：HAL 的 Plum_V0 段 speaker_card_id=2、耳机段也是 2/3，而这台
+# `/tmp/headSetStatus=0@@`（没插耳机）→ 输出走 card2。控制台声音页按这一位读写，
+# 否则会在 card0 上显示一个笔里并不存在的值。**未用滑杆实测**，是按 HAL 配置推的。
+volume_card = 2
 
 [adapt]                             # 平台适配：声明了才生效
 battery     = true                            # hal-battery 读 /sys/class/power_supply（同 a6pro）

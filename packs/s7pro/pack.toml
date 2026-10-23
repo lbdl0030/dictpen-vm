@@ -40,8 +40,12 @@ yres = 240
 rotation = 270
 
 [audio]
-# 厂商播放链路按 card 序号打开设备（config 表要 card1）；VM 默认只挂一块。
-cards = 2
+# Y08_CV1813_V0 的 asound.conf：speaker=card1、数字耳机=card2。
+# 只挂 2 块卡时数字耳机别名指向不存在的 card2，应用放音会 open 失败。
+cards = 3
+# 音量落在 card2：`/tmp/headSetStatus=1@@` 让 HAL 认为数字耳机插着，放音与音量都走
+# digital_hs_card_id=2。控制台声音页按这一位读写 mixer，否则会"滑杆动了、值不动"。
+volume_card = 2
 
 [adapt]
 battery     = true                  # hal-battery 读 /sys/class/power_supply（框架假电量）
@@ -67,6 +71,12 @@ extra       = ["patches/perl-tree",         # fixup 素材：Debian armhf perl�
 # 只用于把文件带进 initrd；真正落盘由 fixup.sh 第 11 节直接拷进 $TARGET。
 "patches/libvmstorage-armhf.so" = "/usr/lib/libvmstorage-armhf.so"
 "patches/miniapp-wrapper.sh"    = "/usr/lib/miniapp-wrapper.sh"
+# 应用侧两个空操作（源码同目录 appfix.c）：① 家长控制 WS 定时器桩，不桩它 app 每 16 s
+# abort 一次（asio 定时器线程上抛出的 websocketpp 异常没人接）；② verifyLicense 恒真，
+# 不然开机约 5 分钟后重校验失败（VM 没有 yd_misc_info 分区），前台被切到「开始激活」且退不回。
+# 同上面两行，这一行只把文件带进 initrd，落盘由 fixup.sh 第 11 节做。取证与判据见
+# README.md「崩溃循环」「激活页」两节与 docs/固件能力盘点.md §12.16、docs/疑难排查.md。
+"patches/libvmappfix-armhf.so" = "/usr/lib/libvmappfix-armhf.so"
 # OCR 栈桩化（fixup.sh 第 3 节有完整原因链）：真 libyocr 的 init 链要 CVITEK TPU
 # （/dev/ion、/dev/cvi-tpu0），VM 没有；直接藏会让 dlopen("libyocr.so") 失败 →
 # global/verify jsapi 断 → 全黑。桩 = 真库全导出改写（init/open/create 返回 -1、

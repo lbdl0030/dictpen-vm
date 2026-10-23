@@ -4,10 +4,18 @@
     python scripts/package.py                 # 列清单 + 自检（不写文件）
     python scripts/package.py --out dist/x.zip
     python scripts/package.py --check         # 只自检，违规就非零退出
+    python scripts/package.py --full --out dist/dictpen-vm-<ver>.zip
+                                              # 发布包：代码 + 文档 + 各包整套适配文件
+                                              # （含 patches 里的 .so / .amr / 载荷，
+                                              #   版权与用途见 docs/发布说明.md §6）
 
 为什么要这样做：整个工作目录 >4GB，其中绝大多数是可再获取的外部依赖
 （QEMU 3GB、固件 1.3GB、状态盘 512MB）和**不该外传**的东西（SSH 私钥、
 自签证书）。收到包的人跑 `python scripts/bootstrap.py` 就能把这些补齐。
+
+`--full` 是给"发到 GitHub Releases 的那个 zip"用的：它会带上 `packs/*/patches/`
+里的全部适配文件（打过补丁的 HAL、shim、presetpkgs、合成器载荷），这样镜像到位
+就能直接跑。固件镜像、`.deb`、状态盘、私钥仍然一律不进。
 """
 import argparse
 import fnmatch
@@ -21,7 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import packlib                                                # noqa: E402
 
 # 只带这些（白名单比黑名单安全：新增大文件不会被误打进包里）
-INCLUDE_DIRS = ["scripts", "vmgui", "docs", "deps", ".trae/documents"]
+# 不带 .trae（编辑器/agent 的工作目录，不是给人用的东西）
+INCLUDE_DIRS = ["scripts", "vmgui", "docs", "deps"]
 INCLUDE_FILES = ["README.md", ".gitignore", ".gitattributes", "run-vm.cmd",
                  "stop-vm.cmd", "ssh-vm.cmd", "console.cmd", "vm-console.cmd",
                  "downloads/releases.json"]
@@ -47,12 +56,16 @@ def dist_plan():
         return {}
 
 
-def wanted(relpath, dp):
+def wanted(relpath, dp, full=False):
     parts = relpath.replace("\\", "/").split("/")
     if any(p in SKIP_DIRS for p in parts):
         return False
     if os.path.splitext(relpath)[1].lower() in SKIP_EXT:
         return False
+    if full and parts[0] == "packs":
+        # 全量包：带整套适配文件；镜像/外部软件包/状态盘仍由 SKIP_EXT 与下面这条挡住
+        base = parts[-1]
+        return not (base == "state.img" or base.endswith(".cpio.gz"))
     if parts[0] == "packs":                      # 只带包描述，见 packlib.dist_plan()
         if len(parts) < 2:
             return False
@@ -67,14 +80,14 @@ def wanted(relpath, dp):
     return parts[0] in INCLUDE_DIRS
 
 
-def collect(dp):
+def collect(dp, full=False):
     files = []
     for dirpath, dirnames, filenames in os.walk(ROOT):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for name in filenames:
-            full = os.path.join(dirpath, name)
-            rel = os.path.relpath(full, ROOT)
-            if wanted(rel, dp):
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, ROOT)
+            if wanted(rel, dp, full):
                 files.append(rel)
     return sorted(files)
 
@@ -104,17 +117,20 @@ def dist_problems(dp):
     return problems
 
 
-def self_check(files, dp):
+def self_check(files, dp, full=False):
     problems = dist_problems(dp)
     total = 0
+    # 全量包放行 .so/.amr/载荷（版权与用途写在 docs/发布说明.md §6），其余禁忌照旧
     for rel in files:
         size = os.path.getsize(os.path.join(ROOT, rel))
         total += size
         base = os.path.basename(rel)
         for pattern, why in FORBIDDEN:
+            if full and pattern == "*.so":
+                continue
             if fnmatch.fnmatch(base, pattern) or fnmatch.fnmatch(rel.replace("\\", "/"), pattern):
                 problems.append(f"{rel} 不该打包（{why}）")
-    if total > MAX_TOTAL:
+    if total > MAX_TOTAL and not full:
         problems.append(f"总大小 {total / (1 << 20):.1f}MB 超过上限 "
                         f"{MAX_TOTAL / (1 << 20):.0f}MB —— 多半混进了大文件")
     return problems, total
@@ -125,11 +141,13 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", metavar="ZIP", help="写出 zip（默认只列清单）")
     ap.add_argument("--check", action="store_true", help="只自检，有问题就返回 1")
+    ap.add_argument("--full", action="store_true",
+                    help="发布包：带 packs/*/patches 里的整套适配文件（含 .so）")
     args = ap.parse_args()
 
     dp = dist_plan()
-    files = collect(dp)
-    problems, total = self_check(files, dp)
+    files = collect(dp, args.full)
+    problems, total = self_check(files, dp, args.full)
     print(f"将打包 {len(files)} 个文件，共 {total / 1024:.0f} KB")
     for rel in files:
         print("  " + rel)
@@ -138,7 +156,8 @@ def main():
         for p in problems:
             print("  [!] " + p)
         return 1
-    print("\n自检通过：没有固件/外部依赖/私钥/状态盘。")
+    print("\n自检通过：没有固件镜像/外部依赖/私钥/状态盘。"
+          + ("（全量包，含各包适配文件）" if args.full else ""))
     if args.check or not args.out:
         print("收包的人：python scripts/bootstrap.py（按 deps/manifest.toml 补齐依赖）")
         return 0

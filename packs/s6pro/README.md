@@ -236,7 +236,34 @@ python scripts\dpctl.py sh -c "miniapp_cli install /etc/miniapp/resources/preset
 
 ## 声音（2026-10-22）
 
-`[audio] cards = 2`：厂商播放链路按 card 序号打开设备，只有 `card0` 时
-SoundPlayer 报 ALSA `Invalid value for card`。补第二块 `usb-audio` 后
-`dpctl audio-check` 通过（端点峰值约 34.5%~34.9%）。SoundPlayer 由厂商 init
-自启，本包不需要额外脚本。随身听的 USB 上传目录是 `/userdisk/Music/`（大写 M）。
+`[audio] cards = 4`。不是“2 块够用”：本机 `Plum_V0` 的音频配置是 **mic=card1、
+speaker=card2、数字耳机=card3**，`/etc/asound.conf` 的 `spk_softvol` 也写死
+`hw:2,0`。只挂 2 块卡时 `dpctl audio-check` 能过（它用 card0/card1），但应用内
+放音会打开不存在的 card2，SoundPlayer 报 `No such file or directory` 并立刻 stop
+（表现为“点一下就没声”）。补到 4 块卡后实测：
+
+- 入口：随身听 → 我的 → USB 上传 → `I Wanna Know.mp3`，点歌词区显示控制栏后按播放。
+- SoundPlayer：`open=======success`；宿主端点峰值 **78.6%**（冷启动复验），
+  手工热插到 4 卡时是 85.3%。界面会保持播放/暂停切换。
+- 证据：`vm/_s6_cold_playing.png`、`vm/_s6_cold_peak.txt`（冷启动）、
+  `vm/_s6_play4.png`、`vm/_s6_peak4.txt`（热插）。
+- 顺带一个观察：这台播放时应用会把**宿主默认端点的音量**改掉（本次从 80% 变 15%），
+  说明它的音量写入能落到宿主设备；这不代表音量联动已经做完，只是链路通了。
+
+应用侧两件事**已做成幂等**（2026-10-23，写在 `patches/runDictPen.sh` 里，每靴在 miniapp
+启动前跑；原先只是状态盘上的手工活，换盘就丢）：
+
+1. **随身听钉回包内预设 2.1.1**：商店升上来的 2.1.3 缺框架 `ydListen`/`ydListenManager` 会黑屏。
+   `miniapp_cli install` 要框架起来才有效，所以放后台等它先起，每个状态盘只装一次
+   （标记 `/userdata/cfg/.vm_s6_listen_pin`；装失败不写标记，下次开机重试）。
+2. **媒体播放器两库的 `DT_NEEDED`**：`libjsapi_mediaplayer_*` / `libbusiness_mediaplayer_*`
+   还写着 `libyocr.so`（本包为 VM 藏掉了 libyocr），就地改成同长度的 `libdl.so.2`。
+   只在文件里还有 `libyocr.so` 时才动，`a`/`b` 两种变体目录与三种 pkg 根都覆盖。
+
+**验证**（2026-10-23，8GB 状态盘）：`miniapp_cli install` 回 `{"appid": "8080232418330628",
+"ret": 0}`、`packages.json` 里随身听与设置都回到 **2.1.1**、标记文件生成；
+把 `libjsapi_mediaplayer_822330678.so` 里的 `libdl.so.2` 手工改回 `libyocr.so`（grep 2 处）
+再 `killall -9 miniapp.real`，重启后自动变回 0 处 —— 补丁分支实测生效。
+首页截图 `vm/_s6_after_pin.png`。
+
+随身听的 USB 上传目录是 `/userdisk/Music/`（大写 M）。

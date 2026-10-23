@@ -266,3 +266,10 @@ if [ -f /patches/libvmstorage-armhf.so ] && [ -f /patches/miniapp-wrapper.sh ]; 
     chmod 755 "$TARGET/usr/lib/libvmstorage-armhf.so" "$TARGET/usr/lib/miniapp-wrapper.sh"
     echo "pack hook fixup: armhf storage shim installed"
 fi
+# 应用侧两个空操作：家长控制 WS 定时器桩 + verifyLicense 恒真（安装路径与上面同一套，
+# 原因见 appfix.c 顶部注释、miniapp-wrapper.sh 与 §12.16）。
+if [ -f /patches/libvmappfix-armhf.so ]; then
+    cp -f /patches/libvmappfix-armhf.so "$TARGET/usr/lib/libvmappfix-armhf.so"
+    chmod 755 "$TARGET/usr/lib/libvmappfix-armhf.so"
+    echo "pack hook fixup: armhf app-side stubs installed"
+fi

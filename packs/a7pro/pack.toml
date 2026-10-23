@@ -21,8 +21,9 @@ bpp      = 32
 swap_rb  = true
 
 [audio]
-# 厂商播放链路按 card 序号打开设备（config 表要 card1）；VM 默认只挂一块。
-cards = 2
+# 本机 asound.conf：speaker=card1、数字耳机 tc_digital/dhs_hwplug=card2。
+# 只挂 2 块卡时数字耳机别名指向不存在的 card2，应用放音会 open 失败。
+cards = 3
 
 [adapt]                                        # a6pro 同族的经验适配
 touchbridge = "patches/touchbridge.pl"         # 鼠标 -> 触摸桥（uinput，axs_ts）

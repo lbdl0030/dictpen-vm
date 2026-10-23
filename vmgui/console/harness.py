@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 import wave
 from typing import Optional
 
@@ -134,11 +135,44 @@ def panel(name: Optional[str] = None) -> tuple[int, int]:
     return DPCTL.panel_size(name)
 
 
+def swap_rb(name: Optional[str] = None) -> bool:
+    """这台机型的帧要不要交换 R/B（a6pro/a7pro 的 falcon 输出与扫描线相反）。
+
+    控制台换目标时要重新问（`ConsoleWindow._apply_pack`）——帧是逐帧取的，
+    按启动那一刻的包定死这个标志，从 a 系列切走或切进来的整屏颜色都是反的。
+    """
+    return DPCTL.swap_rb_for(name or current_pack())
+
+
 def current_pack() -> Optional[str]:
     return DPCTL.current_pack_name()
 
 
 _KEY_CODES = {"HOME_CODE": "home", "VOL_DOWN_CODE": "vol_down", "VOL_UP_CODE": "vol_up"}
+
+
+def volume_card(pack: Optional[str]) -> int:
+    """这台的音量落在哪张声卡（声音页读写它；没声明的包按 card0）。
+
+    厂商 HAL 按 `youdao_hal_audio_config.json` 里那颗 `*_vol_ctl_numid` 往**指定卡**写值，
+    而 VM 里每块 QEMU usb-audio 都有同名控件，盯错卡就是"滑杆动了、值不动"。s7pro 的输出
+    设备是 card2（`/tmp/headSetStatus=1@@`，HAL 认为数字耳机插着），不是 `speaker_card_id`。
+    声明超出 `[audio].cards` 时按最大合法卡号收（配置写错不该往不存在的卡上发命令）。
+    """
+    if not pack:
+        return 0
+    path = os.path.join(ROOT, "packs", str(pack), "pack.toml")
+    try:
+        with open(path, "rb") as f:
+            audio = (tomllib.load(f).get("audio", {}) or {})
+    except (OSError, tomllib.TOMLDecodeError):
+        return 0
+    try:
+        cards = max(1, int(audio.get("cards") or 1))
+        card = int(audio.get("volume_card") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(card, cards - 1))
 
 
 def keys_for(pack: Optional[str]) -> dict:

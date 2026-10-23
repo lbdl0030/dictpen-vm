@@ -226,6 +226,37 @@ global.verifyLicense  false redo verify
 
 ## 声音（2026-10-22）
 
-只有 `card0` 时 SoundPlayer 报 `ALSA lib pcm_hw.c:(_snd_pcm_hw_open) Invalid value for card`
-并立即 stop（表现为“点一下就没声”）。`pack.toml` 加 `[audio] cards = 2` 后 `card1`
-出现，播放链路可以打开。
+**症状**：随身听里点播放，界面进入播放页后立刻停住，宿主没有声音（“点一下就没声”）。
+
+**两个缺口，缺一不可**：
+
+1. **音频 HAL 选不到平台配置**。HAL 的板型键来自 DTS，VM 的
+   `/proc/device-tree/model` 是 `linux,dummy-virt`，查询键为 `unkown_V?`；
+   镜像的 `/usr/configs/youdao_hal_audio_config.json` 没有这一节，
+   `youdao_hal_config_get` 返回空，SoundPlayer 启动即
+   `m_audioModule->init() failed : -1`。
+   → 包内 `patches/youdao_hal_audio_config.json` 在 28 节原值之外补一节
+   `unkown_V?`，内容取本机自己的 `RK3562_Orange_V0`（speaker=card0、
+   数字耳机=card1）。
+2. **数字耳机的 ALSA 别名指向不存在的 card2**。HAL 打开的不是 `hw:1,0`，
+   而是别名 `tc_digital`；镜像通用 `/etc/asound.conf` 里
+   `dhs_hwplug`/`tc_digital` 都写死 `plughw:2,0`。真机由 S01systeminit 的
+   `audio_params_init_on_orange` 把 `/etc/asound.conf.VOrange-dvt` bind 过去，
+   但那个后台循环要求 `amixer -c 0` 有 ≥48 个 mixer 控件，QEMU 声卡只有 3 个，
+   所以永远不会执行 bind。结果 `snd_pcm_open("tc_digital")` 报
+   `Invalid value for card`，`openOutputDevice faild`，播放立刻结束。
+   → 包内 `patches/asound.conf` 只把这两个别名改到 `plughw:1,0`，其余逐字
+   保持镜像原值。
+
+再加 `pack.toml` 的 `[audio] cards = 2`（card0 扬声器 + card1 数字耳机）。
+
+**验证（冷启动，2026-10-22）**：
+- 入口：随身听 → 我的 → 本地下载 → USB 上传 → `I Wanna Know.mp3`；
+  播放页控制栏会自动隐藏，点一下歌词区先让它出现，再按中间播放键。
+- SoundPlayer 日志：`Audio open : tc_digital!` →
+  `open=======success`；宿主默认端点峰值 **74.4%**，界面保持暂停键。
+- 截图：`vm/_x7_final_playing.png`；峰值输出 `vm/_x7_peak_final.txt`。
+
+**排查工具（未进包）**：`vm/_x7_hal/` 保留了 HAL 库与音频配置副本；
+用 aarch64 `LD_PRELOAD` 包住 `snd_pcm_open` 抓到实际设备名就是
+`tc_digital`（日志 `vm/_x7_hal/sndlog/`）。

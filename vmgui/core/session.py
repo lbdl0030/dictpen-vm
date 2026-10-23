@@ -63,6 +63,12 @@ class Session:
             self.backend.stop()
             self.backend = None
 
+    def set_swap_rb(self, flag: bool) -> None:
+        """换目标机型时逐帧的颜色通道跟着换（后端每帧读它，不用重连）。"""
+        self.swap_rb = bool(flag)
+        if self.backend is not None and hasattr(self.backend, "swap_rb"):
+            self.backend.swap_rb = self.swap_rb
+
     def reconfigure(self, cfg) -> None:
         """配置变更后热更新：换后端对象，只重建必要部件。"""
         log.info("应用新配置（重建后端）")

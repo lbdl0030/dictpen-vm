@@ -64,6 +64,39 @@ LOG_FILE=/userdata/applog/DictPen_`date +%Y%m%d_%H%M%S`.log
 
 # pack: switchPartition.sh 已删（见文件头注释 3），厂商版此处会调用它
 /usr/bin/vm-keys-apply   # VM 实体键：板型 + uinput 替身，必须在 miniapp 之前
+# pack: 应用侧两处修复的幂等版（Q147）。这两件事原先只在状态盘上手工做，换盘或重装就丢：
+#  1) 已安装的媒体播放器包 DT_NEEDED 里还是 libyocr.so，而 fixup 已经把 libyocr 藏掉
+#     （没有 CVITEK TPU），于是播放页起不来。包内预设 amr 是补丁版，但已经装上的那份
+#     不会自己变 —— 在这里就地改成同长度的 libdl.so.2；没写 libyocr.so 的文件不碰。
+#  2) 随身听被商店升到 2.1.3 会缺框架模块 ydListen/ydListenManager 而黑屏，钉回包内
+#     预设 2.1.1。`miniapp_cli install` 要框架起来才有效，所以放后台等它先起；
+#     每个状态盘只装一次（标记文件；装失败不写标记，下次开机再试）。
+for _root in /userdata/miniapp /userdisk/miniapp /userdisk/secondary/miniapp; do
+    for _var in a b; do
+        for _lib in "$_root"/data/mini_app/pkg/8001650599023931/"$_var"/libs/*mediaplayer*.so; do
+            [ -f "$_lib" ] || continue
+            if grep -qa 'libyocr.so' "$_lib"; then
+                /usr/bin/perl -pi -e 's/libyocr\.so/libdl.so.2/g' "$_lib" \
+                    && echo "pack: $(basename "$_lib") DT_NEEDED -> libdl.so.2"
+            fi
+        done
+    done
+done
+VM_LISTEN_PIN=/userdata/cfg/.vm_s6_listen_pin
+if [ ! -f "$VM_LISTEN_PIN" ]; then
+    (
+        for _wait in 60 90 120; do
+            sleep $_wait
+            if /usr/bin/miniapp_cli install \
+                    /etc/miniapp/resources/presetpkgs/8080232418330628.amr \
+                    >> /userdata/applog/vm-listen-pin.log 2>&1; then
+                : > "$VM_LISTEN_PIN"
+                break
+            fi
+        done
+    ) &
+fi
+
 /usr/bin/miniapp > $LOG_FILE 2>&1
 
 # pack: 厂商版此处的崩溃计数 / update_engine --misc=clear / reboot 分支已删

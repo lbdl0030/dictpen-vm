@@ -214,6 +214,17 @@ busybox 对 `dir/.` 源报 `cp: omitting directory ...`，libtomcrypt/libtommath
 
 - **OCR 不可用**（设计如此）：libyocr/libYoudaoStitch 是桩，拍题/扫描类功能不可用；
   其余功能正常。若将来要真 OCR，需要给 VM 造 /dev/ion + /dev/cvi-tpu0 的等效物。
+- **点云端专辑曲目会崩**：听力精选里任一专辑，点曲目标题或点下载图标都约 1 秒后 abort，
+  机制是 `std::stoll("")` 抛在厂商线程池上没人接（探针实测，见 docs/固件能力盘点.md §12.19）。
+  本地导入的曲目不受影响。是不是厂商 bug 待真机判定，§12.19 里写了判据。
+- ~~**本地导入的 MP3 打开后不发声**~~ **这条作废**：按正确手势（先点画面中部召出控制条
+  再按播放）能正常播，card2 进 `RUNNING`、宿主端点峰值 66.6%。当时读的是 card0/card1，
+  而这台输出在 card2（见「音量」一节与 docs §12.18）。
+- **录音/口语评测在 VM 里不可能工作**：QEMU usb-audio 三张卡都只有 `pcm0p`，
+  `/proc/asound/pcm` 没有任何 capture 流。可以用内核树里的
+  `sound/drivers/snd-aloop.ko` 造一张双向卡（本次实测 `arecord -D default` 能出 192044 B），
+  但它没进包：卡号会变（`hw:0,0` 是采集默认，要连 `/etc/asound.conf` 与 HAL 的
+  `mic_card_id` 一起改），且改完对崩溃循环无影响（已排除）。
 - **QMP `key` 到不了 virtio-tablet，但 `abs` 到得了**（2026-10-20 抓包更正本条旧说法）：
   原文写的是"`abs`/`key` 都到不了"，**测错了** —— 同一台、同一条 QMP 会话，四种批次形状
   （按下与移动同批 / 分开，各两个新位置）**4/4 都在 `/dev/input/event1` 抓到
@@ -353,7 +364,96 @@ shim 里把 `_ZN28YAsyncLocalTranslatorPrivate12loadNmtPatchEv` 做成 no-op 跳
 
 ## 声音（2026-10-22）
 
-`[audio] cards = 2`：厂商播放链路按 card 序号打开设备，只有 `card0` 时
-SoundPlayer 报 ALSA `Invalid value for card`。补第二块 `usb-audio` 后
-`dpctl audio-check` 通过（端点峰值约 34.5%~34.9%）。SoundPlayer 由厂商 init
-自启，本包不需要额外脚本。随身听的 USB 上传目录是 `/userdisk/Music/`（大写 M）。
+`[audio] cards = 3`：这台 `Y08_CV1813_V0` 的 `/etc/asound.conf` 与 HAL 配置把播放
+别名分到 `card1`（`spk_softvol`）与 `card2`（`tc_digital`、`tca_softvol`），只有两块卡时
+应用放音会 open 失败；`cards = 3` 让别名全部落空位（逐台卡数规则见
+docs/固件能力盘点.md §12.14）。`dpctl audio-check` 通过（端点峰值约 34.5%，
+宿主端点换成 HUAWEI USB-C HEADSET 后 36.6%）。SoundPlayer 由厂商 init 自启，
+本包不需要额外脚本。随身听的 USB 上传目录是 `/userdisk/Music/`（大写 M）。
+
+**一个坑（2026-10-22 实测）**：`/etc/asound.conf` 在这台不是真身 —— `S01systeminit` 按板型
+`mount --bind /etc/asound.conf.VY08 /etc/asound.conf`（同文件里还有 `.VPineapple` 等分支）。
+erofs 里的 `/etc/asound.conf`（3769 B）与生效的 `/etc/asound.conf.VY08`（3681 B）内容不同，
+所以要改 asound 必须改 **`.VY08` 那一份**（或整个绕开 bind）；改 `/etc/asound.conf` 会被盖掉。
+本轮实验后已核对：`/etc/asound.conf.VY08` 与 erofs 原件 `cmp` 一致，没留差异。
+
+**通道通了不等于应用能放**：s7pro 的应用内播放仍未打通（点本地曲目后
+`pcm0p/sub0/status` 全 `closed`，`mediaPlayerManager` JS 报 `TypeError: not a function`），
+取证见 docs/固件能力盘点.md §12.16 末。
+
+## 崩溃循环：家长控制的 WS 定时器（2026-10-22，已修）
+
+现象是 miniapp 每 16 秒 abort 一次、guardian 无限重拉。真因与家长控制无关的功能都无关：
+`libbusiness_parentcontrol_*.so` 的 10 秒定时器在 asio 线程（`asio_for_timer`）上调
+`YParentControlPrivate::connectServer()` → `sendLoginMsg()` → `YWebSocket::sendTextMessage()`，
+VM 里连不上云端，websocketpp 抛出异常，那条线程没有 catch，于是 `std::terminate` → `abort`。
+
+修法是把 `connectServer` 桩掉：`patches/libvmappfix-armhf.so`（源码
+`patches/appfix.c`，`zig cc -target arm-linux-gnueabihf -shared -fPIC -O2`），
+fixup.sh 第 11 节装进 `/usr/lib`，`miniapp-wrapper.sh` 的 `LD_PRELOAD` 追加它。
+该符号在 `.dynsym` 里是 `STB_GLOBAL`、库没用 `-Bsymbolic`，所以 interposition 生效。
+**代价：家长控制（时长管理）在 VM 里不再连云端，限额与同步界面不可信。**
+
+抓栈办法（`__cxa_throw` 与 SIGABRT 都抢不到时可用）：interpose `abort()` 后线性扫栈，
+只保留落在 exec 段里的字，宿主用 pyelftools 按符号表解析 ——
+`vm/_s7_crash/catch4.c` 与 `vm/_s7_crash/resolve.py`，完整证据链在
+docs/固件能力盘点.md §12.16。
+
+验证（`down` + `up --pack s7pro` 干净重启）：首页截图 `vm/_s7_stable_home.png`，
+miniapp pid 145 秒不变、`.dmp` 计数不变、`/proc/<pid>/maps` 里能看到桩。
+
+## 激活页（2026-10-22）
+
+崩溃循环修好之后，这台第一次活过了开机后约 5 分钟的重校验点，随即跳到「开始激活」：
+
+```
+[ERROR] yd_misc_info open fail          ← VM 没有存设备码的 misc 分区
+------- global.verifyLicense  false redo verify
+```
+
+前台被切到验证 app（包 `8080282888534774`），并且 `/userdata/cfg/license` 被删掉，
+所以只补 verifyLicense 还不够，要把凭证写回来。两步：
+
+1. `patches/libvmappfix-armhf.so` 里导出 `YSystemInfoAdapter::verifyLicense`
+   与 `Internal::YSystemInfoAdapterPrivate::verifyLicense` 返回 1（源码 `patches/appfix.c`，
+   与家长控制 WS 桩同一个库、同一条 `LD_PRELOAD`）；
+2. 现场恢复：`sh /etc/init.d/S00license` 重写 174 字节开发凭证，再重启 miniapp。
+   重启本身也会补（S00license 见文件不存在就写）。
+
+判据：`grep -c -E 'redo verify|verifyLicense' <本次 DictPen_*.log>` 归 0，
+首页截图 `vm/_s7_back_home.png`。配方与顺序坑的完整说明在 docs/疑难排查.md §5.2。
+
+## 音量（2026-10-22）
+
+**这台的音量与放音原本就是好的，不用改固件配置。** 本轮先误判过一次：以为断点在
+HAL 配置里的控件号（`speaker_vol_ctl_numid=4`、两个耳机口 `=5`，而 QEMU usb-audio
+每卡只有 numid 1..3），改了确实"看起来通了"，但把配置放回固件原值重启后照样通 ——
+原因是**这台的输出设备是 card2**（`/tmp/headSetStatus=1@@`，HAL 认为数字耳机插着，
+音量与放音都走 `digital_hs_card_id=2`），而我一开始盯的是 card0/card1。
+配置补丁已撤回，客机与 erofs 原件 `cmp` 一致。
+
+固件原样下的实测（本地导入 `I Wanna Know.mp3`：随身听 → 我的 → 本地下载 → USB 上传 →
+点曲目 → 点一下画面中部召出控制条 → 按播放）：
+
+| 操作 | card2 mixer | 播放状态 | 宿主端点峰值 |
+|---|---|---|---|
+| 应用启动按 `spk_volume=80` 落值 | 205 [80%] | `pcm0p` RUNNING | 66.6% |
+| 快捷面板把音量条点到 38% | 97 [38%] | 继续 RUNNING | 37.7% |
+
+四条要记的判据：
+
+- **先确认输出卡**再谈音量：看 `/tmp/headSetStatus` 与 HAL 段的 `digital_hs_card_id`，
+  或直接逐卡 `amixer -c N sget 'Audio Output Volume Control'` 看谁在动。
+- 播放成没成看两处：`/proc/asound/card2/pcm0p/sub0/status` 是不是 `RUNNING`、
+  宿主端点峰值（`scripts/audio-endpoint.ps1 -PeakSeconds 6`）。应用日志不够。
+- 控制条几秒自动收起：先点一下画面中部召出来，再按播放，否则会误判成"不放音"。
+- `amixer` 报的 dB 是假的（QEMU 的 0~256 是线性幅度，38% 显示 -76 dB 却听得到）；
+  `sys_config.conf` 的 `spk_volume` 不随拖条即时更新。两者都不能当判据。
+- **`/usr/configs/youdao_hal_audio_config.json` 会被厂商服务在运行中回写**：手改回固件原值后，
+  一个没重启的 `runSysconfigMgr` 把内存里的旧值写回了文件（实测 mtime 与内容都翻回去）。
+  所以在这台上改配置必须走包的 `[adapt.replace]`（每靴覆盖），并且改完要重启才算数。
+
+控制台侧真修的一处：声音页原来把读写写死在 `-c 0`，与这台的 card2 不一致（显示 94%
+而笔里是 80%）。现在按包声明读 —— `[audio] volume_card = 2` → `harness.volume_card()`，
+验法是不点 GUI 而是跑控制台自己的代码路径：`python vm/_snd_card_check.py s7pro`
+得到 `{'card': 'Audio_2', 'vol': 80}`。完整过程与作废说明在 docs/固件能力盘点.md §12.18。
