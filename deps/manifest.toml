@@ -226,7 +226,7 @@ check = "packs/x6pro/images/system_a.img"
 how = "manual"
 also = ["packs/x6pro/images/boot_a.img"]
 optional = true
-where = "从 X6pro 的 OTA 包提取，步骤见 packs/x6pro/DEVLOG.md"
+where = "boot 可直下（上游名 X6pro_boot_ext4.img，改名成 boot_a.img）；system_a 要从 X6pro 的 OTA 提取，步骤见 packs/x6pro/DEVLOG.md"
 note = "版权归网易有道，仅供个人研究。"
 
 [[item]]

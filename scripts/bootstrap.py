@@ -126,6 +126,7 @@ def download_resumable(url, dest, expected_size=0):
 
 
 MAX_DL_THREADS = 32
+FW_BASE = "https://github.com/lbdl0030/dictpen-rootfs/releases/download"
 PARALLEL_MIN_BYTES = 16 << 20      # 小于这个走单线，省得为 3 MB 的 boot 开 16 个连接
 CHUNK_MIN = 4 << 20
 CHUNK_MAX = 32 << 20
@@ -329,54 +330,53 @@ def how_initramfs(item):
     run([PY, os.path.join(ROOT, "scripts", "build-initramfs.py")])
 
 
+def _acquire(url, dest, size, md5, threads):
+    """下一个文件并核对 MD5：已就位就跳过，大文件多线程，服务端不认 Range 就回落单线。"""
+    want_size = int(size or 0)
+    if (os.path.exists(dest) and (not want_size or os.path.getsize(dest) == want_size)
+            and md5_of(dest) == md5):
+        print(f"    {rel(dest)} 已就位（MD5 已核对）")
+        return
+    if os.path.exists(dest):
+        os.remove(dest)                       # 大小或 MD5 不对：整份重下
+    if want_size >= PARALLEL_MIN_BYTES and threads > 1:
+        try:
+            download_parallel(url, dest, want_size, threads)
+        except NoRange:
+            print("    服务端不支持 Range，改单线下载")
+            _clean_chunks(dest)
+            download_resumable(url, dest, want_size)
+    else:
+        download_resumable(url, dest, want_size)
+    got = md5_of(dest)
+    if got != md5:
+        _clean_chunks(dest)
+        os.remove(dest)
+        raise RuntimeError(f"MD5 不符：{rel(dest)} 期望 {md5}，实际 {got}")
+    print(f"    MD5 已核对：{md5}")
+
+
+def fw_url(item, f):
+    """上游 release 资产地址：`base/<tag>/<上游文件名>`。"""
+    return f"{item.get('base', FW_BASE)}/{item['release']}/{f['upstream']}"
+
+
 def how_firmware(item):
+    """上游 release 上的固件镜像：按上游名下载，落盘改成 vm 规范名。"""
     into = item.get("into", "downloads")
-    missing, bad = [], []
+    threads = dl_threads(item)
     for f in item["files"]:
-        path = under(os.path.join(into, f["local"]))
-        if not os.path.exists(path):
-            missing.append(f)
-        elif md5_of(path) != f["md5"]:
-            bad.append((f, path))
-    if bad:
-        raise Manual("文件在但校验不过，请重新下载：\n" + "\n".join(
-            f"      {rel(p)}  MD5 期望 {f['md5']}，实际 {md5_of(p)}" for f, p in bad))
-    if missing:
-        raise Manual(
-            f"固件需自行下载（{item.get('note', '')}）：\n"
-            f"      {item.get('page', '')}\n" + "\n".join(
-                f"      {f['upstream']:<24} -> {into}/{f['local']}\n"
-                f"      MD5 {f['md5']}" for f in missing))
+        _acquire(fw_url(item, f), under(os.path.join(into, f["local"])),
+                 f.get("size", 0), f["md5"], threads)
 
 
 def how_http(item):
-    """直接从 URL 下已切好的镜像（支持断点续传），下完核对 MD5。"""
+    """清单里写死 URL 的直下条目（a7p / p5 / x3s342 的已切好镜像）。"""
     into = item.get("into", "downloads")
+    threads = dl_threads(item)
     for f in item["files"]:
-        dest = under(os.path.join(into, f["local"]))
-        want_size = int(f.get("size") or 0)
-        if (os.path.exists(dest) and (not want_size or os.path.getsize(dest) == want_size)
-                and md5_of(dest) == f["md5"]):
-            print(f"    {rel(dest)} 已就位（MD5 已核对）")
-            continue
-        if os.path.exists(dest):
-            os.remove(dest)                   # 大小或 MD5 不对：整份重下
-        threads = dl_threads(item)
-        if want_size >= PARALLEL_MIN_BYTES and threads > 1:
-            try:
-                download_parallel(f["url"], dest, want_size, threads)
-            except NoRange:
-                print("    服务端不支持 Range，改单线下载")
-                _clean_chunks(dest)
-                download_resumable(f["url"], dest, want_size)
-        else:
-            download_resumable(f["url"], dest, want_size)
-        got = md5_of(dest)
-        if got != f["md5"]:
-            _clean_chunks(dest)
-            os.remove(dest)
-            raise RuntimeError(f"MD5 不符：{rel(dest)} 期望 {f['md5']}，实际 {got}")
-        print(f"    MD5 已核对：{f['md5']}")
+        _acquire(f["url"], under(os.path.join(into, f["local"])),
+                 f.get("size", 0), f["md5"], threads)
 
 
 def how_manual(item):
@@ -428,9 +428,9 @@ def hint(item):
                 if not os.path.exists(under(os.path.join(into, f["local"])))]
         if not todo:
             return None
-        return (f"      去 {item.get('page', '')} 拿（{item.get('note', '')}）：\n"
-                + "\n".join(f"      {f['upstream']:<22} -> {into}/{f['local']}"
-                            f"   MD5 {f['md5']}" for f in todo))
+        return (f"      直接下载（去掉 --check 就会执行；{item.get('page', '')}）：\n"
+                + "\n".join(f"      {fw_url(item, f)}\n"
+                            f"        -> {into}/{f['local']}  MD5 {f['md5']}" for f in todo))
     if how == "manual":
         return f"      {item.get('where', '')}" + (
             f"\n      {item['note']}" if item.get("note") else "")
