@@ -2,15 +2,16 @@
 
 在 Windows 上用 QEMU 运行**词典笔真实固件**的虚拟机（不需要管理员权限，也不需要 WSL）。
 框架本身不含固件：一台机器会变的东西全在 `packs/<名字>/` 里，启动时用 `--pack` 选一台。
-仓库自带七个包：**a6pro / a7pro / s6pro / s7pro / x5pro / x6pro / x7**。
+仓库自带八个包：**a6pro / a7pro / s6pro / s7pro / x5pro / x6pro / x7 / x3s342**。
 
 ## 最快上手
 
 **第一次用，先下载**（之后每次只要第 4 步）。`bootstrap.py` 下的是 QEMU、通用内核与
 initramfs 工具链，以及**五台有上游镜像的固件**（a6pro / a7pro / s6pro / s7pro / x5pro）。
 固件按包分开、都标 optional，`python scripts\bootstrap.py --only firmware-x5pro` 只取一台；
-**x6pro 与 x7 上游没有现成镜像**，要从各自的 OTA 包提取，步骤见
-[docs/发布说明.md](docs/发布说明.md) §3。
+**x6pro、x7 与 x3s342 上游没有现成镜像**：x6pro / x7 要从各自的 OTA 包提取（步骤见
+[docs/发布说明.md](docs/发布说明.md) §3）；x3s342 的 `system_a` 是增量载荷，还要按
+[packs/x3s342/README.md](packs/x3s342/README.md) 把它合到 2.8.65 基线 rootfs 上。
 
 ```bat
 :: 1) 拿到仓库：clone，或从 GitHub Releases 下载 dictpen-vm-<版本>.zip 解压
@@ -41,7 +42,7 @@ python scripts\dpctl.py down               :: 关机
 
 | 命令 | 一句话 |
 |---|---|
-| `dpctl packs [名字]` | 列出七个包：镜像在不在、MD5 对不对 |
+| `dpctl packs [名字]` | 列出八个包：镜像在不在、MD5 对不对 |
 | `dpctl up --pack <名>` | 起一台机器；`--fresh` 清空状态盘、`--fast` 用快照约 6 秒回首页、`--display none` 不开窗 |
 | `dpctl down` / `status` | 关机 / 看状态（`run-vm.cmd` 起的也认） |
 | `dpctl console` | 打开控制台窗口（等价双击 `vm-console.cmd`） |
@@ -522,7 +523,8 @@ https://fanyidan.youdao.com/fanyidanapi/activation/v2/verify
 | Hermes / Y09P / Y09 / Pear / A7pro | — | RV1106, Linux | 各 release 的 rootfs + boot | 🔶 同族，应只需改配置（未实测） |
 | **X7pro** | YDPX7 | RV1106, Linux（aarch64+glibc） | `x7-system_a.img`（无 boot，面板参数取自镜像内 cfg.json） | ✅ `rv1106-linux-erofs`（fourcc/logo 补丁，见 packs/x7pro/README.md） |
 | X5pro | — | RK3566, Android 系 | `X5pro`: x5-1-pro-ro-rootfs_b.img + boot_b | ⛔ 需要新的 runtime |
-| X3s / X6plus | Cherry-3566 | RK3566 | `Cherry-3566-OTA-*`（需解包 OTA） | ⛔ 需要新的 runtime |
+| X3s | Cherry-3566 | RK3566 | `X3s-OTA-OS3.4.2`（增量合到 2.8.65 基线，见 packs/x3s342/README.md） | ✅ `rockchip-linux-ext4`（packs/x3s342，miniapp 桌面；OS 2.8.65 旧 Qt 线已归档停做） |
+| X6plus | Cherry-3566 | RK3566 | `Cherry-3566-OTA-*`（需解包 OTA） | 🔶 同板族未建包（未实测） |
 | X7（RK3562 代） | RK3562_Orange | RK3562 | `X7` 等 | ⛔ 需要新的 runtime（注意：`x7-system_a.img` 实为 RV1106 族，已按上行支持） |
 | S6pro / S7pro | PineApple / Y08_CV1813 | Cvitek CV1826 | `S6pro` / `S7pro` | ⛔ 需要新的 runtime |
 

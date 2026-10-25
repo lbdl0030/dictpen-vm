@@ -1,0 +1,67 @@
+# 固件包：x3s342 —— YDPX3s（RK3566 / Youdao CHERRY）OS 3.4.2，miniapp 桌面那条线。
+#
+# 来源：`X3s-OTA-OS3.4.2` 的全量包 `YDPX3s-OTA-all-os3.4.2.img`（1 586 915 914 B）。
+# 与 `packs/x3s`（OS 2.8.65，旧版 native Qt 桌面）是同一块板子的两代固件：
+# 3.4.2 的 `/usr/bin/runDictPen` 最后执行 `/usr/bin/miniapp`，旧 Qt 那行是注释掉的，
+# 桌面由 miniapp 运行时提供（x6pro / x7 / s7pro 同一条线）。
+#
+# 3.4.2 的 `system_a` 不是完整 rootfs，是**增量载荷**（`addition/modify/delete.filelist`
+# + `do_*.sh` + `manifest.xml`，根下没有 `/sbin/init`、`/etc/inittab`）。
+# 所以 `x3s342-merged.img` = 2.8.65 完整 rootfs 当基线，按厂商三个脚本把 3.4.2 增量合进去：
+#   do_delete.sh  759 条（其中 737 条在 /oem/YoudaoDictPen/output 下，整套旧 Qt 应用）
+#   do_addition.sh 401 条（/usr/bin/miniapp、/etc/miniapp/jsapis、ASR 模型…）
+#   do_modify.sh   409 条（SoundPlayer/SoundRecord/capt、四个 init.d 脚本…）
+# 合并后 `/Version` 变成 3.3.8（3.4.2 的应用版本号），`/sbin/init`、`/etc/inittab` 来自基线。
+#
+# 分区表取自包内 `Image/parameter.txt`；RKAF 条目里 pos 相对 RKAF、padded 才是字节数：
+#   system_a  pos=0x13b2000  size=0x2f200000 (790 626 304)   ← 增量载荷
+#   uresource pos=0x305b2000 size=0x2e300000 (774 897 664)
+#   boot_a    pos=0x7b6800   size=0xbfb600   (12 563 968)    ← FIT（kernel+dtb）
+
+name    = "x3s342"
+note    = "YDPX3s / RK3566 / OS 3.4.2（miniapp 桌面）；增量合到 2.8.65 基线上"
+version = "3.4.2"
+
+[platform]
+soc     = "rk3566"
+runtime = "rockchip-linux-ext4"
+
+[image]
+rootfs = "images/x3s342-merged.img"
+boot   = "images/x3s342-boot_a.img"
+extra  = ["images/x3s342-uresource.img"]
+
+[display]
+xres     = 800
+yres     = 480
+rotation = 270
+bpp      = 32
+
+[audio]
+# 只挂 1 块卡：QEMU usb-audio 是 card0，patches/asound.conf.vm 把厂商那份里
+# 指向 card1 的别名（dhs_*/tc_*）全部收回 hw:0,0，所以不需要像 a6pro/s7pro
+# 那样补 cards。音量落在 card0（`speaker_vol_ctl_numid=3`，
+# 'Audio Output Volume Control Playback Volume'），就是 volume_card 的默认位。
+cards = 1
+volume_card = 0
+
+[adapt]
+battery = true                      # 假电量，避免进桌面后低电量关机
+license = true                      # 开发凭证
+ap = true                           # 虚拟 AP（wlan1 广播 Youdao-VM），应用联网页要用
+# 合成器载荷与 UI 入口：prepare.sh 把 S55vm-ui 装进 /etc/init.d，
+# 两份 weston 载荷落到 /userdata，再由 S55vm-ui 在开机时解开。
+hooks = ["patches/prepare.sh"]
+extra = ["weston.tar", "patches/weston9.tar", "patches/S55vm-ui",
+         "patches/S45vm-wifi", "patches/touchbridge.bin",
+         "patches/libvmsn.so", "patches/install-presets.sh",
+         "patches/asound.conf.vm", "patches/fakekeys.bin",
+         "patches/vm-keys.env", "patches/libvmstorage.so"]
+
+[state]
+size_mb = 2048
+
+[checks]
+"images/x3s342-merged.img"    = { md5 = "12bb1b885162bd4470d6ff4c90a77b3b" }
+"images/x3s342-boot_a.img"    = { md5 = "a341047a41e3e52eff12a76ffc5cc8d3" }
+"images/x3s342-uresource.img" = { md5 = "e5cc77e890d98ea904e9c8f19d9b00c3" }

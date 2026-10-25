@@ -1,0 +1,137 @@
+#!/bin/sh
+# p5 UI 栈：软件合成器（x6pro 同款 Debian weston 10 载荷）+ 固件自己的应用。
+# 结构照 x6pro 的 S50vm-ui，改动：model 绑定换成 Almond 板、去掉 fake-keys
+# 与 desktop 载荷两块（P5 未做），预置包安装保留。
+[ "$1" = start ] || exit 0
+
+LOG=/userdata/applog
+mkdir -p $LOG /userdata/cfg /userdisk/miniapp/data/mini_app/pkg /userdisk/corefile 2>/dev/null
+[ -f /userdata/cfg/debug.cfg ] || cp /etc/debug.cfg /userdata/cfg/debug.cfg 2>/dev/null
+
+# 存储页：真机 S21mountall 建 /dev/block/by-name；VM 停用它后设置里的
+# getStorageInfo 找不到分区会回 -1。数据盘 vdb、系统盘 vda，先建软链顶上。
+mkdir -p /dev/block/by-name
+ln -sf /dev/vdb /dev/block/by-name/userdata
+ln -sf /dev/vdb /dev/block/by-name/userdisk
+ln -sf /dev/vda /dev/block/by-name/system_a
+ln -sf /dev/vda /dev/block/by-name/system_b
+
+# 板型：厂商 HAL 的 youdao_get_pcba_version() 读 /proc/device-tree/model，
+# 按固定表映射（本机 'Rockchip RK3566 Youdao Almond Board' → Almond_V0）。
+# QEMU 的 model 是 linux,dummy-virt，映射成 unkown_V? 后按键/板型模块全挂。
+# 内核不让写 model，用 bind mount 换成真机名；必须在 app 起来之前生效。
+MODEL='Rockchip RK3566 Youdao Almond Board'
+printf '%s' "$MODEL" > /tmp/dt-model
+if [ "$(cat /proc/device-tree/model 2>/dev/null)" != "$MODEL" ]; then
+    mount --bind /tmp/dt-model /proc/device-tree/model 2>>$LOG/vm-ui.log
+fi
+
+# 预置 mini-app 包：应用按 <pkg>/<id>/a/ + libs/ 找（x6pro 同款安装循环）。
+if [ ! -e /userdisk/miniapp/.pkgs-installed ]; then
+    for f in /etc/miniapp/resources/presetpkgs/*.amr; do
+        [ -f "$f" ] || continue
+        id=$(basename "$f" .amr)
+        d=/userdisk/miniapp/data/mini_app/pkg/$id
+        mkdir -p "$d/a/libs"
+        unzip -o -q "$f" -d "$d/a" >/dev/null 2>&1
+    done
+    touch /userdisk/miniapp/.pkgs-installed
+fi
+
+# 合成器：**必须 Weston 9**（P5 的 libfalcon 只引用 wl_shell_interface / 0 个 xdg，
+# Debian weston 10 把 wl_shell 编译掉了，应用在 wl_proxy_marshal_constructor 里
+# SIGSEGV——首启实测 exit 139）。x3s342 同病同修：双载荷，
+#   weston.tar  = bookworm 运行库 + loader（P5 系统 glibc 只有 2.29，载荷库要更高）
+#   weston9.tar = weston 9 本体 + libweston-9 + 模块（bullseye）
+if [ ! -x /userdata/debweston/usr/bin/weston ] && [ -f /userdata/weston.tar ]; then
+    mkdir -p /userdata/debweston
+    tar xf /userdata/weston.tar -C /userdata/debweston
+fi
+if [ ! -x /userdata/debweston9/usr/bin/weston ] && [ -f /userdata/weston9.tar ]; then
+    mkdir -p /userdata/debweston9
+    tar xf /userdata/weston9.tar -C /userdata/debweston9
+fi
+# 模块目录是编译期写死的 /usr/lib/aarch64-linux-gnu/{libweston-9,weston}
+if [ ! -e /usr/lib/aarch64-linux-gnu/libweston-9/drm-backend.so ]; then
+    mkdir -p /usr/lib/aarch64-linux-gnu
+    rm -rf /usr/lib/aarch64-linux-gnu/libweston-10 /usr/lib/aarch64-linux-gnu/weston
+    cp -a /userdata/debweston9/usr/lib/aarch64-linux-gnu/libweston-9 /usr/lib/aarch64-linux-gnu/ 2>/dev/null
+    cp -a /userdata/debweston9/usr/lib/aarch64-linux-gnu/libweston-desktop-9.so.0* /usr/lib/aarch64-linux-gnu/ 2>/dev/null
+    cp -a /userdata/debweston9/usr/lib/aarch64-linux-gnu/weston /usr/lib/aarch64-linux-gnu/ 2>/dev/null
+fi
+chmod -R 755 /userdata/debweston/usr/bin /userdata/debweston/usr/lib /userdata/debweston/lib 2>/dev/null
+chmod -R 755 /userdata/debweston9/usr/bin 2>/dev/null
+
+export XDG_RUNTIME_DIR=/run/debweston
+mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+
+# 经 loader 起，comm 是 ld-linux-aarch64，pidof 认不到，按 /proc 命令行认；
+# /run 在持久 overlay 上，硬断电会留下旧 socket，只认 socket 会永远不起 weston。
+weston_alive() {
+    for p in /proc/[0-9]*; do
+        cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)
+        case "$cmd" in */userdata/debweston9/*weston*) return 0;; esac
+    done
+    return 1
+}
+W=/userdata/debweston
+W9=/userdata/debweston9
+if ! weston_alive; then
+    rm -f "$XDG_RUNTIME_DIR/wayland-0" "$XDG_RUNTIME_DIR/wayland-0.lock"
+    setsid "$W/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1" \
+        --library-path "$W9/usr/lib/aarch64-linux-gnu/weston:$W9/usr/lib/aarch64-linux-gnu:$W/usr/lib/aarch64-linux-gnu:$W/lib/aarch64-linux-gnu" \
+        "$W9/usr/bin/weston" --backend=drm-backend.so --use-pixman \
+        --shell=kiosk-shell.so --tty=1 --socket=wayland-0 --idle-time=0 \
+        --log=$LOG/vm-weston9.log >/dev/null 2>&1 < /dev/null &
+    n=0
+    while [ ! -S "$XDG_RUNTIME_DIR/wayland-0" ] && [ $n -lt 60 ]; do
+        n=$((n + 1)); sleep 1
+    done
+    echo "p5: weston9 wait ${n}s socket=$([ -S "$XDG_RUNTIME_DIR/wayland-0" ] && echo ready || echo MISSING)" >>$LOG/vm-ui.log
+fi
+
+export WAYLAND_DISPLAY=wayland-0
+export LD_LIBRARY_PATH=/oem/YoudaoDictPen/output/libs:/etc/miniapp/jsapis:/etc/miniapp/messageknife
+cd /oem/YoudaoDictPen/output || exit 1
+
+# 触摸桥（C 版，无 perl 依赖）：virtio-tablet -> vm-touch（959x265 逻辑屏坐标），
+# event 节点软链到 cfg 的 tp 路径 axs_ts。必须在 miniapp 之前就绪。
+if [ -x /usr/bin/touchbridge.bin ]; then
+    for p in /proc/[0-9]*; do
+        c=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)
+        case "$c" in */usr/bin/touchbridge.bin*) kill "${p#/proc/}" 2>/dev/null;; esac
+    done
+    setsid /usr/bin/touchbridge.bin /dev/input/event1 959 265 \
+        >$LOG/vm-touchbridge.log 2>&1 < /dev/null &
+    i=0
+    while [ $i -lt 30 ]; do
+        node=$(awk '/^N: Name="vm-touch"/{f=1} f&&/^H: Handlers=/{for(i=1;i<=NF;i++) if ($i ~ /^event[0-9]+$/) {print "/dev/input/" $i; exit}}' /proc/bus/input/devices)
+        [ -n "$node" ] && break
+        sleep 0.2
+        i=$((i + 1))
+    done
+    if [ -n "$node" ]; then
+        mkdir -p /dev/input/by-path
+        ln -sf "$node" /dev/input/by-path/axs_ts
+        echo "p5: touchbridge $node -> by-path/axs_ts" >>$LOG/vm-ui.log
+    else
+        echo "p5: touchbridge did not create vm-touch" >>$LOG/vm-ui.log
+    fi
+fi
+
+# 照固件自己的 launcher：zh_CN 环境 + 受监管的声音服务 + 应用本体。
+export LC_ALL=zh_CN.utf8
+export LANG=zh_CN.utf8
+export ALSA_LIB_ADD_GAIN=1
+/usr/bin/runSysconfigMgr >$LOG/vm-sysconfig.log 2>&1 &
+sleep 2
+# SoundPlayer 按卡序号开设备，与 pack.toml 的 [audio] cards=3 配套。
+setsid /usr/bin/guardian_run /usr/bin/runSoundPlayer start >$LOG/vm-soundplayer.log 2>&1 < /dev/null &
+sleep 1
+# 存储 shim（见 patches/vmstorage.c）：把厂商固定的 getStorageInfo 换成状态盘的 statvfs。
+if [ -f /userdata/libvmstorage.so ]; then
+    export LD_PRELOAD=/userdata/libvmstorage.so
+fi
+setsid /usr/bin/guardian_run /usr/bin/miniapp >$LOG/vm-miniapp.log 2>&1 < /dev/null &
+echo "p5: compositor + firmware app launched"
+exit 0

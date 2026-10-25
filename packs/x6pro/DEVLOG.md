@@ -57,9 +57,9 @@
 | 开发凭证 | `S00license: dev license written (174 bytes)`；`/userdata/cfg/license` 174 字节 |
 | 合成器 | `S50vm-ui` 后 socket `/run/debweston/wayland-0` 就绪；`vm-weston.log`：`DRM: output Virtual-1 uses shadow framebuffer`、`Output 'Virtual-1' enabled with head(s) Virtual-1` |
 | 应用接入 | `vm-miniapp*.log`：`wayland handle_global interface(wl_shm/xdg_wm_base/...)`、`WLNativeWindow::setSurfaceSize(960,480)`、`xdg_surface_configure`、`setSize(960,266)`、`setPosition(0,107)` |
-| 界面像素 | `vm/melon-ui5.png`：固件真实 UI 上屏（激活页按钮），UI 条带位于 y=107 的 960×266 区域 |
+| 界面像素 | `vm/shots/melon-ui5.png`：固件真实 UI 上屏（激活页按钮），UI 条带位于 y=107 的 960×266 区域 |
 | 触控（鼠标→触摸桥） | 自研 `patches/touchbridge.pl`：uinput 设备 name/phys=axs_ts → `/dev/input/by-path/axs_ts -> /dev/input/event2`；`dpctl tap 300 150` → 桥日志 `down 300,83`、`tap 600 350` → `down 599,193`（UI 像素坐标）。**注意：本轮取证发现当时设备是废的，应用并无反应；修复见 §5.6(1)** |
-| 桌面全渲染 | `vm/melon-home2.png`：查词翻译 / 语法精讲 / 随身听 三张卡片完整（960×266 条带，y=107）；资源来自 `vm/vm/desktop_x`（178 张图 + 页面 bundle），装入 `pkg/<id>/a/`（id 取应用日志的 topAppId：8080222437664451 / 8080252464522508）后图片错误从数百次降到 15 次 |
+| 桌面全渲染 | `vm/shots/melon-home2.png`：查词翻译 / 语法精讲 / 随身听 三张卡片完整（960×266 条带，y=107）；资源来自 `vm/vm/desktop_x`（178 张图 + 页面 bundle），装入 `pkg/<id>/a/`（id 取应用日志的 topAppId：8080222437664451 / 8080252464522508）后图片错误从数百次降到 15 次 |
 | 渲染耗时 | 应用启动 → 首帧全渲染 ≈ **77 s**（采样：65.2 s 仍是合成器背景，76.8 s 出现 315 KB 全渲染帧；TCG 纯软件模拟）。合成器不再被跳过后，本轮实测 20 s 内出全帧 |
 | 网络（Wi-Fi 关联 + DHCP） | 通过 | `x6pro-wifi: ssid=Youdao-VM wpa_state=COMPLETED` + `wlan0 inet addr:10.201.126.13x`（AP 的 dnsmasq 发租约）；eth0 出网 DNS 与 ICMP 实测通 |
 | 触摸设备形态 | 修复后通过 | 当时 `B: EV=1`（一个位都没设上）；按值传参修复后 `B: EV=b`、`B: ABS=3`、`B: PROP=2`，weston 记 `tagged by udev as: Touchscreen` / `device is a touch device`（§5.6(1)） |
@@ -85,7 +85,7 @@
 
 ### 5.2 验收结论（本会话最终）
 
-**已达成**：显示链路 + 固件真实 UI 全渲染。`vm/melon-home2.png` 是完整桌面（查词翻译 / 语法精讲 / 随身听 三张卡片，960×266 条带居中在 y=107）。渲染耗时为实测两轮独立数据：
+**已达成**：显示链路 + 固件真实 UI 全渲染。`vm/shots/melon-home2.png` 是完整桌面（查词翻译 / 语法精讲 / 随身听 三张卡片，960×266 条带居中在 y=107）。渲染耗时为实测两轮独立数据：
 
 | 轮次 | 应用启动 → 首帧全渲染 | 证据 |
 |------|----------------------|------|
@@ -380,7 +380,7 @@ python scripts\dpctl.py up --pack x6pro --fresh --headless
 # 等到下面两条都成立，再截图；期间界面停在 splash 是正常的
 python scripts\dpctl.py sh -c "grep -c homeModeIconShow=false /userdata/applog/vm-miniapp.log"  :: >=1
 python scripts\dpctl.py sh -c "grep -c systemEnvCustomPresetAppInstalled /userdata/applog/vm-miniapp.log" :: >=1
-python scripts\dpctl.py screenshot --out vm\x.png                                             :: >100 KB = 首页
+python scripts\dpctl.py screenshot --out vm\shots\x.png                                             :: >100 KB = 首页
 ```
 
 截图对照：`vm/_x6pro/fb3-home.png`（全新盘首启后的首页，三卡片图片完整）、
@@ -451,7 +451,7 @@ python vm\_x6pro\dis_a64.py vm\_x6pro\libydhal_devices.so 0xa394           # 定
 python scripts\dpctl.py packs x6pro
 python scripts\dpctl.py up --pack x6pro --headless
 python scripts\dpctl.py wait --timeout 240
-python scripts\dpctl.py screenshot --out vm\melon.png
+python scripts\dpctl.py screenshot --out vm\shots\melon.png
 python scripts\dpctl.py sh --serial -c \"tail -3 /userdata/applog/vm-weston.log\"
 ```
 
@@ -536,14 +536,14 @@ grep -E '^Event' /tmp/ev1.log
   的整帧（`read_ppm(screendump())`）＝960×480、`pack.toml [display]`＝960/480。
   **上下那两条黑边不是我们裁的，是固件自己的字盒**：`cfg.json` 的
   `screen` 写着 `width 960 / height 266 / yoffset 107`，而 `107 = (480−266)/2` —— 实测上黑边
-  112 px、下黑边 104 px，**是居中，不是偏下**（`vm/_x6_clean2.png`）。
+  112 px、下黑边 104 px，**是居中，不是偏下**（`vm/shots/_x6_clean2.png`）。
 - **试验过"铺满"**：把 cfg 改成 `height 480 / yoffset 0` → 整屏只剩 weston 的灰底，app 不再画
   （266 是承重的，不能这么改）。已退回并**干净重启复验**首页正常。两份脚本留在
   `vm/_qwen_x6_cfg480.sh` / `vm/_qwen_x6_cfgrestore.sh`（改前自动备份到 `/userdata/cfg.json.bak-x6screen`）。
 - **真成立的那半条（同日再复核后修正措辞）**：首页第 3 张卡（随身听）在 x=960 处被切，而且
   **横滑不动** —— 试过两种手势（850→250；慢速 880→120、24 步、按住 0.5 s），前后帧逐像素比对无位移
   （只有唱针动画在动）。也就是这一行**既放不下也不能滚**；但**看得见的那一段是点得到的**：
-  `tap 830 240` 开出随身听（`vm/_x6_sweep.png`）—— 我上一版写「第三颗点不到」**说得过头了**，
+  `tap 830 240` 开出随身听（`vm/shots/_x6_sweep.png`）—— 我上一版写「第三颗点不到」**说得过头了**，
   准确说法是「点得到，但看不全」。
   ⚠ §4 那句「三张卡片完整」与实测不符，以本条为准。
 - **映射本身没偏**：`tap 515 240` 开出的就是它下面那张卡（查词翻译 → 规范扫描页）；
@@ -568,7 +568,7 @@ grep -E '^Event' /tmp/ev1.log
 - **实测（冷启动两轮）**：model 正确；home/volumeUp/volumeDown 的 `init failed` 消失
   （power 68 / head 45 是这两颗设备节点本来没造的预期值）；`echo 102 > /tmp/fake-keys.fifo`
   → `homeCb` / `homeButtonClick`，从「查词翻译」回桌面
-  （`vm/_final_inapp.png` → `vm/_final_home.png`）。
+  （`vm/shots/_final_inapp.png` → `vm/shots/_final_home.png`）。
 - **音量键**：事件到了（OSD 也弹），但 `setVolumeCallBack is_okay:-22`，日志
   `(amixer_cset:118)snd_ctl_open error`。`hal_audio_config.json` 的 `RK3562_Melon_V0`
   用真机的 `speaker_card_id=1` / `speaker_vol_ctl_numid=54`；VM 只有 QEMU USB Audio 的
@@ -580,7 +580,7 @@ grep -E '^Event' /tmp/ev1.log
 - **控制台入口实点**：用 Windows UI Automation 对真控制台的 `Home` / `音量＋` 按钮下发
   `Invoke`（不是宿主合成鼠标 —— 那条进不了 app，Q78③）：guest 日志
   `13:03:44 homeCb`、`13:03:53 setVolumeCallBack--->100 is_okay:100`，ALSA 落到 `255,255`；
-  工具条实拍 `vm/_console_keys.png`（三颗键，没有播放）。
+  工具条实拍 `vm/shots/_console_keys.png`（三颗键，没有播放）。
 - **坑**：`fake-keys` 是 HAL 里的调试路径，不是 x6pro 配置里的 id；只造 `by-path/fake-keys`
   会一直 -14。排查顺序：先 `cat /proc/device-tree/model`，再对 `hal_key_config.json` 的
   `*_key_id`，最后才怀疑 uinput。
@@ -613,7 +613,7 @@ grep -E '^Event' /tmp/ev1.log
   `userdata/userdisk -> /dev/vdb`、`system_a/system_b -> /dev/vda`。
 - **下一步（已做，§7.14）**：厂商适配层报的是固定硬件 JSON（4GB、user/available 0），
   状态盘扩容不会改变它。用 preload shim 覆盖同名 `getStorageInfo`，改成 VM 状态盘。
-- 截图 `vm/_x6_storage_fixed.png` / `vm/_x6_storage_2g_c.png`；台账 Q98。
+- 截图 `vm/shots/_x6_storage_fixed.png` / `vm/shots/_x6_storage_2g_c.png`；台账 Q98。
 
 ## 7.14 设置存储跟随 VM 状态盘：preload shim（2026-10-21）
 
@@ -631,7 +631,7 @@ grep -E '^Event' /tmp/ev1.log
 - **注入**：`pack.toml [adapt].extra` 把 shim/wrapper 带进 initrd；`prepare.sh` 把 shim
   放 `/usr/lib/libvmstorage.so`，把 `/usr/bin/miniapp` 换成 wrapper（真启动器保留
   `/usr/bin/miniapp.real`）。guardian 也按 `/usr/bin/miniapp` 起，所以一处覆盖即可。
-- **实测**：2G 盘 `0.4GB/2GB`；3G 盘 `0.4GB/3GB`（`vm/_x6_storage_pack3g.png`）；
+- **实测**：2G 盘 `0.4GB/2GB`；3G 盘 `0.4GB/3GB`（`vm/shots/_x6_storage_pack3g.png`）；
   `/proc/<miniapp>/maps` 能看到 `/usr/lib/libvmstorage.so`。
 - **边界**：这是 VM 适配 shim（不是固件派生物）；`scripts/package.py` 的纯代码包仍
   按 `.so` 拦截，完整发布包才带。其他机型要按各自适配层符号/UI 逐台验证。

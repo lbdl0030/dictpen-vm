@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -79,12 +80,31 @@ class Runtime:
         return ["-device", f"bochs-display,xres={pack.xres},yres={pack.yres}"]
 
     @staticmethod
-    def drive_args(pack, state_img):
+    def _extra_copy(pack, path):
+        """额外镜像按"每台虚拟机一份可写副本"挂。
+
+        这些分区（如 x3s 的 uresource）在固件首启时会被应用改写：先用
+        `mount -o remount,rw` 把离线资源搬进去，再切回 ro。直接挂包里的原图
+        既写不进去，也会改脏发布资产，所以第一次启动时复制到 `vm/`。
+        """
+        dst = os.path.join(ROOT, "vm", f"extra-{pack.name}-{os.path.basename(path)}")
+        if not os.path.exists(dst):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(path, dst)
+        return dst
+
+    @classmethod
+    def drive_args(cls, pack, state_img):
         state_fmt = os.environ.get("DICTPEN_STATE_FMT", "raw")
-        return [
+        args = [
             "-drive", f"file={pack.rootfs},if=virtio,format=raw,readonly=on",
             "-drive", f"file={state_img},if=virtio,format={state_fmt},cache=writeback",
         ]
+        # 包声明的额外镜像：/dev/vdc、vdd…（顺序即声明顺序）
+        for path in getattr(pack, "extra_images", []) or []:
+            args += ["-drive",
+                     f"file={cls._extra_copy(pack, path)},if=virtio,format=raw,cache=writeback"]
+        return args
 
 
 # --------------------------------------------------------------------------- #

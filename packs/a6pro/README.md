@@ -45,7 +45,7 @@ python scripts\dpctl.py pack import dist\a6pro.dpm
 - **做法**：`patches/vm-keys.pl` + `vm-keys-apply` + `vm-keys.env` + `vm-keys.sh` 钩子；
   板型串 `Rockchip RV1106 for Pear V10 Board`。首次 app 启动前换 model 会黑屏，故由
   `S50vm-keys` 等首 app 起来后 apply、停掉 runDictPen 与 app、直接启动一个 miniapp。
-- **验证**：冷启动后查词翻译 → 桌面（`vm/_a6_final_after.png`）；单实例；控制台只亮 Home。
+- **验证**：冷启动后查词翻译 → 桌面（`vm/shots/_a6_final_after.png`）；单实例；控制台只亮 Home。
 - 快速启动可选：`dpctl fast save --pack a6pro`（无音频，见 README 与台账 Q93）。
 
 ## 设置存储跟随 VM 状态盘（Q107，2026-10-21）
@@ -64,9 +64,9 @@ python scripts\dpctl.py pack import dist\a6pro.dpm
   wrapper、原启动器留成 `.real`；shim 放 `/usr/lib/vmstorage/`。
 
 **验证**（状态盘 1GB）：`df /userdata` = 990.7M/152.5M 用。
-- 设置（下拉菜单 → 齿轮）→ 空间清理：**已使用 0.3GB/1GB**（`vm/_a6_pack_storage.png`）。
+- 设置（下拉菜单 → 齿轮）→ 空间清理：**已使用 0.3GB/1GB**（`vm/shots/_a6_pack_storage.png`）。
 - 设置 → 关于 → 存储容量：**1GB**，点进去同样 0.2GB/1GB
-  （`vm/_a6_about_shim2.png`、`vm/_a6_about_storage_shim.png`）。
+  （`vm/shots/_a6_about_shim2.png`、`vm/shots/_a6_about_storage_shim.png`）。
 - 设置列表要用 mouse 形态拖动（同 s6）才滚得动；
   重启后 app 稳定、`/proc/<pid>/maps` 命中 `/usr/lib/vmstorage/libvmstorage-armhf-uclibc.so`。
 - 单测：`vmgui.tests.test_units.TestA6StorageShim`。
@@ -87,8 +87,8 @@ python scripts\dpctl.py pack import dist\a6pro.dpm
 - QMP 的 PNG 截图先落 PPM，再用 `QImage.rgbSwapped()` 存 PNG；
 - `dpctl screenshot`/`view` 在 `grab_pen_screen()` 里交换 R/B。
 
-**验证**：`vm/_a6_swap_fixed2.png`（蓝「查词翻译」+ 橙「语音助手」+ 紫「随身听」）、
-`vm/_a6_console_swap.png`（控制台帧同色）；单测 `TestDisplaySwapRB`。
+**验证**：`vm/shots/_a6_swap_fixed2.png`（蓝「查词翻译」+ 橙「语音助手」+ 紫「随身听」）、
+`vm/shots/_a6_console_swap.png`（控制台帧同色）；单测 `TestDisplaySwapRB`。
 
 ## 网络：虚拟 AP 空闲踢站（Q112，2026-10-21）
 

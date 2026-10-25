@@ -1,0 +1,62 @@
+#!/bin/sh
+# x3s342 的 Wi-Fi 站侧：把 hwsim 的 wlan0 连到 S00wifi-ap 广播的 Youdao-VM，
+# 再起厂商的 wifi-manager（它通过 /var/run/wpa_supplicant/wlan0 读状态、
+# 用 udhcpc 拿租约，并向应用上报 wifi 事件）。
+#
+# 顺序依赖：S00wifi-ap 先把 wlan1 起成 AP；dnsmasq（S80）才发租约，
+# 所以 udhcpc 要重试。open 网络是故意的：笔的触摸 UI 上输密码不现实。
+[ "$1" = start ] || exit 0
+
+LOG=/userdata/applog
+mkdir -p /data/cfg /var/run/wpa_supplicant "$LOG"
+
+if [ ! -f /data/cfg/wpa_supplicant.conf ] || ! grep -q 'Youdao-VM' /data/cfg/wpa_supplicant.conf; then
+    cat > /data/cfg/wpa_supplicant.conf <<'EOF'
+ctrl_interface=/var/run/wpa_supplicant
+ap_scan=1
+update_config=1
+network={
+	ssid="Youdao-VM"
+	key_mgmt=NONE
+}
+EOF
+fi
+
+# wifi-manager 会把 update_config 写成 1 才肯 save；这里保证一次
+grep -q '^update_config=1' /data/cfg/wpa_supplicant.conf || \
+    sed -i 's/^update_config=.*/update_config=1/' /data/cfg/wpa_supplicant.conf
+
+i=0
+while [ $i -lt 100 ]; do
+    [ -e /sys/class/net/wlan0 ] && break
+    sleep 0.2
+    i=$((i + 1))
+done
+
+# 等 S00wifi-ap 的 hostapd 真正广播（否则站侧扫不到 SSID，一直 SCANNING）
+i=0
+while [ $i -lt 100 ]; do
+    grep -q 'AP-ENABLED' /tmp/hostapd.log 2>/dev/null && break
+    sleep 0.2
+    i=$((i + 1))
+done
+
+/usr/bin/killall wpa_supplicant 2>/dev/null
+rm -f /var/run/wpa_supplicant/wlan0
+/usr/sbin/wpa_supplicant -B -Dnl80211 -iwlan0 -c /data/cfg/wpa_supplicant.conf \
+    >>$LOG/vm-wifi.log 2>&1
+
+# 关联 + 租约（dnsmasq 可能还没起来，重试）
+i=0
+while [ $i -lt 30 ]; do
+    if iw dev wlan0 link 2>/dev/null | grep -q '^Connected'; then
+        udhcpc -i wlan0 -T 1 -t 1 -n -q >/dev/null 2>&1 && break
+    fi
+    sleep 1
+    i=$((i + 1))
+done
+echo "x3s342: wifi link after ${i}s: $(iw dev wlan0 link 2>/dev/null | head -2 | tr '\n' ' ')" >>$LOG/vm-wifi.log
+
+# 厂商 wifi-manager：等 wpa_supplicant 出现后自己 attach
+setsid /usr/bin/runWifiMgr >>$LOG/vm-wifi.log 2>&1 < /dev/null &
+exit 0

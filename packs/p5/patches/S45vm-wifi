@@ -1,0 +1,102 @@
+#!/bin/sh
+# x6pro: put the pen's own Wi-Fi station stack on the emulated radio
+# (mac80211_hwsim wlan0) and join the AP the framework publishes on wlan1.
+#
+# What this gives you: the app sees a real associated Wi-Fi link (wpa_state
+# COMPLETED) with a DHCP lease from the guest's own dnsmasq, so the firmware's
+# network page has something true to show.  Guest internet transit still goes
+# over eth0 - the emulated AP is meant for *external* clients (a phone joining
+# Youdao-VM), so the pen's own station cannot route through it from inside the
+# same kernel.  The vendor's wifi-manager IS started, but only after /dev/bes2600
+# has been emulated (see below): against hwsim it used to deauthenticate and
+# disable the interface, and that was the chip-node check failing, not hwsim.
+[ "$1" = start ] || exit 0
+
+LOG=/userdata/applog
+AP=/root/.vm/ap
+IPT="$AP/ld-linux-aarch64.so.1 --library-path $AP/lib $AP/iptables-legacy"
+mkdir -p $LOG /var/run/wpa_supplicant /run/network 2>/dev/null
+
+n=0
+while [ ! -e /sys/class/net/wlan0 ] && [ $n -lt 20 ]; do n=$((n + 1)); sleep 1; done
+if [ ! -e /sys/class/net/wlan0 ]; then
+    echo "x6pro-wifi: no wlan0 (mac80211_hwsim missing?)" >/dev/kmsg
+    exit 0
+fi
+
+# The firmware's wifi state machine (miniapp -> YDAL -> wifi-manager) reads the
+# bes2600 chip node before it reports anything; without /dev/bes2600 the vendor
+# daemon logs "wifi state is disabled" and the app keeps global.isOnline() false
+# even though wpa_state is COMPLETED.  devtmpfs has no such node here, so emulate
+# it: the driver's read output is independent of its write input, so mirror the
+# last WIFI_ON/WIFI_OFF command back as the matching state line.  Poll fast --
+# at 1 s the loop swallows the command late and the UI's toggle wedges on
+# 「正在关闭无线局域网络…」; `read` (not `cat`) keeps the loop fork-free.
+BES=/dev/bes2600
+printf 'wifi opend\n' > $BES 2>/dev/null
+setsid sh -c 'while :; do
+    read -r s < /dev/bes2600
+    case "$s" in
+        *WIFI_OFF*) printf "wifi closed\n" > /dev/bes2600 ;;
+        *WIFI_ON*)  printf "wifi opend\n"  > /dev/bes2600 ;;
+        wifi\ opend|wifi\ closed) : ;;
+        *)          printf "wifi opend\n"  > /dev/bes2600 ;;
+    esac
+    sleep 0.1
+done' >/dev/null 2>&1 < /dev/null &
+
+# wifi-manager owns the wpa_supplicant ctrl socket and publishes the state the UI
+# shows; it expects the config at /data/cfg/wpa_supplicant.conf and needs
+# update_config=1 or its save_config call fails.
+mkdir -p /data/cfg 2>/dev/null
+cat > /data/cfg/wpa_supplicant.conf <<'WPAEOF'
+ctrl_interface=/var/run/wpa_supplicant
+update_config=1
+network={
+    ssid="Youdao-VM"
+    key_mgmt=NONE
+    priority=1
+}
+WPAEOF
+
+killall -q wpa_supplicant 2>/dev/null
+setsid /usr/sbin/wpa_supplicant -Dnl80211 -iwlan0 -c/data/cfg/wpa_supplicant.conf \
+    -f $LOG/vm-wpa.log >/dev/null 2>&1 < /dev/null &
+
+n=0
+while [ $n -lt 30 ]; do
+    if /usr/sbin/wpa_cli -iwlan0 status 2>/dev/null | grep -q 'wpa_state=COMPLETED'; then
+        break
+    fi
+    n=$((n + 1))
+    sleep 1
+done
+
+/sbin/ifconfig wlan0 up 2>/dev/null
+if ! /usr/sbin/udhcpc -n -q -t 3 -T 2 -i wlan0 >/dev/null 2>&1; then
+    /sbin/ifconfig wlan0 10.201.126.2 netmask 255.255.255.0 up 2>/dev/null
+    ip route add 10.201.126.0/24 dev wlan0 src 10.201.126.2 2>/dev/null
+fi
+
+# Publish the link to the firmware: wifi-manager is the wpa_supplicant ctrl
+# client miniapp's YDAL wifi module talks to, so neither the UI's "connected"
+# state nor global.isOnline() can be reached without it.  runWifiMgr waits for
+# wpa_supplicant on its own and passes `sys_config wifi` as the on/off arg.
+setsid /usr/bin/runWifiMgr >/dev/null 2>&1 < /dev/null &
+
+# Keep the AP subnet routable inside the guest (external clients depend on it).
+if [ -x "$AP/iptables-legacy" ]; then
+    echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null
+    XTABLES_LOCKFILE=/tmp/xtables.lock XTABLES_LIBDIR="$AP/xtables" \
+        $IPT -t nat -C POSTROUTING -s 10.201.126.0/24 -o eth0 -j MASQUERADE 2>/dev/null \
+        || XTABLES_LOCKFILE=/tmp/xtables.lock XTABLES_LIBDIR="$AP/xtables" \
+           $IPT -t nat -A POSTROUTING -s 10.201.126.0/24 -o eth0 -j MASQUERADE 2>/dev/null
+fi
+
+if ! grep -q '^nameserver' /etc/resolv.conf 2>/dev/null; then
+    printf 'nameserver 10.0.2.3\n' > /etc/resolv.conf 2>/dev/null
+fi
+
+echo "x6pro-wifi: $(/usr/sbin/wpa_cli -iwlan0 status 2>/dev/null | grep -e '^ssid' -e wpa_state | tr '\n' ' ')" >/dev/kmsg
+echo "x6pro-wifi: wlan0 $(/sbin/ifconfig wlan0 2>/dev/null | grep -o 'inet addr:[0-9.]*' | head -1)" >/dev/kmsg
+exit 0

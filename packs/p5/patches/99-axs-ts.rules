@@ -1,0 +1,4 @@
+# x6pro: the emulated touch node must look like a touchscreen, not a touchpad.
+# Without this libinput classifies it as a touchpad and the pen's touch UI never
+# receives touch events (it only sees pointer motion).
+ACTION=="add|change", SUBSYSTEM=="input", ATTRS{name}=="axs_ts", ENV{ID_INPUT}="1", ENV{ID_INPUT_TOUCHSCREEN}="1", ENV{ID_INPUT_TOUCHPAD}="0"

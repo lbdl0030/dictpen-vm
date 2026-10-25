@@ -15,3 +15,6 @@ cd /d "%~dp0"
 set "PY=python"
 where python >nul 2>nul || set "PY=py -3"
 %PY% scripts\dpctl.py up %*
+rem Double-click closes the window as soon as the command ends; on failure keep it
+rem open long enough to read why the VM did not start.
+if errorlevel 1 pause

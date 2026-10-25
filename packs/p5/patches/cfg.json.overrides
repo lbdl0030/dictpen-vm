@@ -1,0 +1,8 @@
+# p5（Almond 板）：tp 原值 /dev/input/by-path/platform-4020000.i2c-event（真机
+# RK3566 i2c 触摸节点，VM 没有）；覆盖成触摸桥的落点 axs_ts（x6pro 同款技巧）。
+# tp_direction/tp_xoffset/tp_yoffset 归零：桥按虚拟屏 1:1 换算。
+# width/height/direction 保持固件原值（960x266 / direction=270，行为同 x6pro）。
+tp=/dev/input/by-path/axs_ts
+tp_direction=0
+tp_xoffset=0
+tp_yoffset=0

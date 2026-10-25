@@ -4,8 +4,8 @@ S7pro（设备树代号 `Y08_CV1813`，**Cvitek CV1826** 平台）的固件包�
 **erofs**，用户态 32 位 armhf（跑在框架 arm64 内核的 COMPAT 层上）。
 
 **现状（2026-10-05）：可跑。** 引导、桌面 UI 上屏（1020×240 四卡片）、触摸导航、
-SSH/串口、假电量、持久化、网络全部就绪（验收截图见 `vm/s7-clean-home.png` /
-`vm/s7-clean-tap.png`）。本文记录每个"为什么"，按黑屏 → 触摸 → 网络 → 磁盘的
+SSH/串口、假电量、持久化、网络全部就绪（验收截图见 `vm/shots/s7-clean-home.png` /
+`vm/shots/s7-clean-tap.png`）。本文记录每个"为什么"，按黑屏 → 触摸 → 网络 → 磁盘的
 取证顺序展开。
 
 - [1. 文件来源](#1-文件来源)
@@ -33,8 +33,8 @@ MD5 为本地计算的自校验值。镜像版权归网易有道，仅供个人�
 | 能力 | 状态 |
 |------|------|
 | 引导（erofs root + overlay + 4GB 状态盘） | ✅ |
-| UI 上屏 | ✅ 1020×240 桌面四卡片完整正立（`vm/s7-clean-home.png`） |
-| 触摸 | ✅ uinput 桥（axs_ts），`dpctl tap` 位置正确、UI 正常换页（`vm/s7-clean-tap.png`） |
+| UI 上屏 | ✅ 1020×240 桌面四卡片完整正立（`vm/shots/s7-clean-home.png`） |
+| 触摸 | ✅ uinput 桥（axs_ts），`dpctl tap` 位置正确、UI 正常换页（`vm/shots/s7-clean-tap.png`） |
 | SSH（dropbear，arm64） | ✅ 开机自启，宿主 `ssh-vm.cmd` / `dpctl sh` 直达 |
 | 网络（eth0 → slirp 10.0.2.15） | ✅ S00net-up（udhcpc），hostfwd 可用 |
 | 电池 | ✅ S00battery 假电量 |
@@ -163,7 +163,7 @@ UI 毫无反应。
   S00touchbridge 之前，所以要等桥的链接出现，最多 12s；桥没起来退化到裸 tablet）。
 
 验证：干净启动后 `dpctl tap 130 120`（第一张卡片）→ 进入「规范扫描」页
-（`vm/s7-clean-tap.png`）；此前另一轮 `tap 380 120`（第二张卡片）→ 语音助手的
+（`vm/shots/s7-clean-tap.png`）；此前另一轮 `tap 380 120`（第二张卡片）→ 语音助手的
 「开始激活」页——**位置正确**。
 
 > 遗留说明：QMP `abs`/`key` 事件到不了 virtio-tablet 这件事本身（QEMU 11.1.1）没有
@@ -279,11 +279,11 @@ S99wifi-link 等 wpa_supplicant 起来后 `select_network` + `reassociate`；重
 
 **"右边少一块"来自固件首页自己的可横滑卡片行**：4 张卡每张 ~310 px、间距 ~5 px，整行 ~1270 > 1020，
 所以第 4 张（随身听）只露个边。**滑一下就看得到它完整的样子**（`vm/_qwen_s6_drag.py 900 120 200 120`
-→ `vm/_s7_paged.png`：滑到底第 4 张完整、再往右就是黑边，说明整行只有 4 张，不是被切掉）。
-对照：随身听自己的四宫格（听力精选/云盘社区/有道云盘/我的）在 1020 里**摆得下**（`vm/_s7_console2.png`）。
+→ `vm/shots/_s7_paged.png`：滑到底第 4 张完整、再往右就是黑边，说明整行只有 4 张，不是被切掉）。
+对照：随身听自己的四宫格（听力精选/云盘社区/有道云盘/我的）在 1020 里**摆得下**（`vm/shots/_s7_console2.png`）。
 
 **触控按"看得见的地方"命中，右侧也验了**：「配置网络」页最右那颗 Wi-Fi 开关（x≈893）
-`dpctl tap 893 122` 一次就 ON→OFF、再点一次 OFF→ON（`vm/_s7_wifi_toggle.png`）；
+`dpctl tap 893 122` 一次就 ON→OFF、再点一次 OFF→ON（`vm/shots/_s7_wifi_toggle.png`）；
 桥的换算也是准的 —— tablet 收到 `ABS_X=16062/ABS_Y=16384`，桥发给 app 的是 `500/120`
 （面板 1020×240，`vm/_qwen_s7_evprobe.py` 抓的）。控制台那侧：绘制与点击逆变换用的是**同一个**
 `ViewTransform`（`vmgui/view/canvas.py:146` 画在 `t.ox/t.oy`，`window.py:2054` 用 `t` 反解），
@@ -293,7 +293,7 @@ S99wifi-link 等 wpa_supplicant 起来后 `select_network` + `reassociate`；重
 ① 是首页还是某个 app 页；② 当时工具条「缩放」在哪一档、窗口多宽；③ 点的是哪个目标、
 落到了哪儿（有截图最好）。拿到这三条就能直接对着 evdev 抓包比，而不是猜。
 
-**同日再复核（按"在控制台里看"的方式，`vm/_s7_console.png` + `vm/_s7_sweep.png`）**：
+**同日再复核（按"在控制台里看"的方式，`vm/shots/_s7_console.png` + `vm/shots/_s7_sweep.png`）**：
 
 - 控制台里 **1020×240 整帧都在**，上下黑边是画布比画面高，不是裁。
 - 首页是**焦点轮播**，逐列量出来：焦点卡 **12..320（宽 308）**，其余三张 **325..553 / 558..786 /
@@ -319,7 +319,7 @@ S99wifi-link 等 wpa_supplicant 起来后 `select_network` + `reassociate`；重
 - **做法**：`patches/vm-keys.pl` + `vm-keys-apply` + `vm-keys.env` + `vm-keys.sh` 钩子；
   板型串 `Cvitek Cv1826 for Youdao Y08 V0 version`；钩子在 `S01systeminit` 的
   `guardian_run runDictPen` 行前插入 `vm-keys-apply`（首 app 之前、显示初始化之后）。
-- **验证**：冷启动后查词翻译 → 桌面（`vm/_s7_persist_after.png`）；控制台工具条只亮 Home。
+- **验证**：冷启动后查词翻译 → 桌面（`vm/shots/_s7_persist_after.png`）；控制台工具条只亮 Home。
 - 快速启动可选：`dpctl fast save --pack s7pro`（无音频，见 README 与台账 Q93）。
 
 ## 14. 设置存储跟随 VM 状态盘（Q104，2026-10-21）
@@ -358,8 +358,8 @@ shim 里把 `_ZN28YAsyncLocalTranslatorPrivate12loadNmtPatchEv` 做成 no-op 跳
 **验证**（2026-10-21，6GB 状态盘）：
 - `/usr/lib/libvmstorage-armhf.so` 在、`/usr/bin/miniapp` 是包装器、`.real` 在跑；
   `grep libvmstorage /proc/<miniapp.real>/maps` 命中；`df -h /userdata` = 5.9G/1.3G 用。
-- 设置 → 空间清理：**已使用 1.8GB/6GB**（`vm/_s7_pack_storage.png`）。
-- 设置 → 关于 → 存储容量 → 已用存储空间：同样 **1.8GB/6GB**（`vm/_s7_pack_about_storage.png`）。
+- 设置 → 空间清理：**已使用 1.8GB/6GB**（`vm/shots/_s7_pack_storage.png`）。
+- 设置 → 关于 → 存储容量 → 已用存储空间：同样 **1.8GB/6GB**（`vm/shots/_s7_pack_about_storage.png`）。
 - 单测：`vmgui.tests.test_units.TestS7StorageShim`（ELF32/机器 40/三个符号/fixup 安装链）。
 
 ## 声音（2026-10-22）
@@ -399,7 +399,7 @@ fixup.sh 第 11 节装进 `/usr/lib`，`miniapp-wrapper.sh` 的 `LD_PRELOAD` 追
 `vm/_s7_crash/catch4.c` 与 `vm/_s7_crash/resolve.py`，完整证据链在
 docs/固件能力盘点.md §12.16。
 
-验证（`down` + `up --pack s7pro` 干净重启）：首页截图 `vm/_s7_stable_home.png`，
+验证（`down` + `up --pack s7pro` 干净重启）：首页截图 `vm/shots/_s7_stable_home.png`，
 miniapp pid 145 秒不变、`.dmp` 计数不变、`/proc/<pid>/maps` 里能看到桩。
 
 ## 激活页（2026-10-22）
@@ -421,7 +421,7 @@ miniapp pid 145 秒不变、`.dmp` 计数不变、`/proc/<pid>/maps` 里能看�
    重启本身也会补（S00license 见文件不存在就写）。
 
 判据：`grep -c -E 'redo verify|verifyLicense' <本次 DictPen_*.log>` 归 0，
-首页截图 `vm/_s7_back_home.png`。配方与顺序坑的完整说明在 docs/疑难排查.md §5.2。
+首页截图 `vm/shots/_s7_back_home.png`。配方与顺序坑的完整说明在 docs/疑难排查.md §5.2。
 
 ## 音量（2026-10-22）
 

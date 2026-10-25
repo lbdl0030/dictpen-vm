@@ -1,0 +1,200 @@
+#!/bin/sh
+# x3s342（OS 3.4.2 / miniapp 桌面）的 UI 栈启动。
+#
+# 固件自己的 /etc/init.d/S50-app-launcher 按 get_pcba_version 分支，VM 上返回
+# unkown_V? 时两个分支都不走；它调用的 /usr/bin/weston 也不在 system 镜像里。
+# 这里补：DTB model 伪装成 Cherry-3566（HAL/pcba 认板型）、挂 uresource、
+# 起软件合成器、起 /usr/bin/miniapp。
+#
+# 合成器必须是 Weston 9：libfalcon 的 greenui::NativeWindow::create() 用 wl_shell，
+# Debian 的 weston 10 把该协议编译掉了，应用在 wl_proxy_marshal_constructor 崩。
+[ "$1" = start ] || exit 0
+
+LOG=/userdata/applog
+mkdir -p "$LOG" /userdata/cfg /userdisk/corefile 2>/dev/null
+[ -d /userdata/DictPenData ] || mkdir -p /userdata/DictPenData
+if [ ! -e /.config ] || [ -z "$(mount | grep ' /.config ')" ]; then
+    mount --bind /userdata/DictPenData /.config 2>/dev/null
+fi
+
+MODEL='Rockchip RK3566 Youdao CHERRY Board'
+printf '%s' "$MODEL" > /tmp/dt-model
+if [ "$(cat /proc/device-tree/model 2>/dev/null)" != "$MODEL" ]; then
+    mount --bind /tmp/dt-model /proc/device-tree/model 2>>$LOG/vm-ui.log
+fi
+
+mkdir -p /uresource
+if ! mountpoint -q /uresource 2>/dev/null; then
+    mount -t ext4 -o ro /dev/vdc /uresource 2>>$LOG/vm-ui.log
+fi
+mkdir -p /dev/block/by-name
+ln -sf /dev/vdc /dev/block/by-name/uresource
+ln -sf /dev/vdb /dev/block/by-name/userdata
+ln -sf /dev/vdb /dev/block/by-name/userdisk
+ln -sf /dev/vda /dev/block/by-name/system_a
+ln -sf /dev/vda /dev/block/by-name/system_b
+
+# 调试开关：/etc/.vm-no-app 或 /userdata/.vm_no_app → 只起环境不起应用
+if [ -f /etc/.vm-no-app ] || [ -f /userdata/.vm_no_app ]; then
+    echo "x3s342: app skipped by debug marker" >>$LOG/vm-ui.log
+    exit 0
+fi
+
+# 两个载荷：weston.tar（bookworm 的 glibc/wayland/pixman 等运行库）
+#            weston9.tar（weston 9 本体 + libweston-9 + 模块）
+if [ ! -x /userdata/debweston/usr/bin/weston ] && [ -f /userdata/weston.tar ]; then
+    mkdir -p /userdata/debweston
+    tar xf /userdata/weston.tar -C /userdata/debweston
+fi
+if [ ! -x /userdata/debweston9/usr/bin/weston ] && [ -f /userdata/weston9.tar ]; then
+    mkdir -p /userdata/debweston9
+    tar xf /userdata/weston9.tar -C /userdata/debweston9
+fi
+# 模块目录是编译期写死的 /usr/lib/aarch64-linux-gnu/{libweston-9,weston}
+if [ ! -e /usr/lib/aarch64-linux-gnu/libweston-9/drm-backend.so ]; then
+    mkdir -p /usr/lib/aarch64-linux-gnu
+    cp -a /userdata/debweston9/usr/lib/aarch64-linux-gnu/libweston-9 /usr/lib/aarch64-linux-gnu/ 2>/dev/null
+    cp -a /userdata/debweston9/usr/lib/aarch64-linux-gnu/libweston-desktop-9.so.0* /usr/lib/aarch64-linux-gnu/ 2>/dev/null
+    rm -rf /usr/lib/aarch64-linux-gnu/weston
+    cp -a /userdata/debweston9/usr/lib/aarch64-linux-gnu/weston /usr/lib/aarch64-linux-gnu/ 2>/dev/null
+fi
+# weston.tar 在 Windows 上打的包，文件都是 0644
+chmod -R 755 /userdata/debweston/usr/bin /userdata/debweston/usr/lib /userdata/debweston/lib 2>/dev/null
+chmod -R 755 /userdata/debweston9/usr/bin 2>/dev/null
+
+export XDG_RUNTIME_DIR=/run/debweston
+mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+
+# 经 Debian loader 起，comm 是 ld-linux-aarch64，pidof 认不到，按 /proc 命令行认
+weston_alive() {
+    for p in /proc/[0-9]*; do
+        cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)
+        case "$cmd" in */userdata/debweston9/*weston*) return 0;; esac
+    done
+    return 1
+}
+W=/userdata/debweston
+W9=/userdata/debweston9
+weston_alive || rm -f "$XDG_RUNTIME_DIR/wayland-0" "$XDG_RUNTIME_DIR/wayland-0.lock"
+if ! weston_alive; then
+    setsid "$W/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1" \
+        --library-path "$W9/usr/lib/aarch64-linux-gnu/weston:$W9/usr/lib/aarch64-linux-gnu:$W/usr/lib/aarch64-linux-gnu:$W/lib/aarch64-linux-gnu" \
+        "$W9/usr/bin/weston" --backend=drm-backend.so --use-pixman \
+        --shell=kiosk-shell.so --tty=1 --socket=wayland-0 --idle-time=0 \
+        --log=$LOG/vm-weston9.log >/dev/null 2>&1 < /dev/null &
+fi
+n=0
+while [ ! -S "$XDG_RUNTIME_DIR/wayland-0" ] && [ $n -lt 30 ]; do
+    n=$((n + 1)); sleep 1
+done
+echo "x3s342: weston9 wait ${n}s socket=$([ -S "$XDG_RUNTIME_DIR/wayland-0" ] && echo ready || echo MISSING)" >>$LOG/vm-ui.log
+
+export WAYLAND_DISPLAY=wayland-0
+export LD_LIBRARY_PATH=/oem/YoudaoDictPen/output/libs:/etc/miniapp/jsapis:/etc/miniapp/messageknife
+export APP_ROOT_PATH=/oem/YoudaoDictPen/output
+export LC_ALL=zh_CN.utf8
+export LANG=zh_CN.utf8
+export ALSA_LIB_ADD_GAIN=1
+
+# 触控：miniapp 不读 evdev，但 vendor 的输入链按 cfg 的 tp 路径找设备。
+# 桥把 virtio-tablet（BTN_LEFT + 绝对坐标）翻成一块单点触摸屏
+# （BTN_TOUCH + ABS_X/ABS_Y，800x254），再把这个节点软链到 cfg 的 tp 路径。
+if [ -x /userdata/touchbridge.bin ]; then
+    for p in /proc/[0-9]*; do
+        c=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)
+        case "$c" in */userdata/touchbridge.bin*) kill "${p#/proc/}" 2>/dev/null;; esac
+    done
+    setsid /userdata/touchbridge.bin /dev/input/event1 800 254 \
+        >$LOG/vm-touchbridge.log 2>&1 < /dev/null &
+    i=0
+    while [ $i -lt 30 ]; do
+        node=$(awk '/^N: Name="vm-touch"/{f=1} f&&/^H: Handlers=/{for(i=1;i<=NF;i++) if ($i ~ /^event[0-9]+$/) {print "/dev/input/" $i; exit}}' /proc/bus/input/devices)
+        [ -n "$node" ] && break
+        sleep 0.2
+        i=$((i + 1))
+    done
+    if [ -n "$node" ]; then
+        mkdir -p /dev/input/by-path
+        ln -sf "$node" /dev/input/by-path/platform-4020000.i2c-event
+        echo "x3s342: touchbridge $node -> by-path/platform-4020000.i2c-event" >>$LOG/vm-ui.log
+    else
+        echo "x3s342: touchbridge did not create vm-touch" >>$LOG/vm-ui.log
+    fi
+fi
+
+# 实体键替身（见 patches/fakekeys.c）：厂商按键 HAL 按
+# /usr/configs/hal_key_config.json 的 Cherry-3566_V0 节找
+# by-path/platform-adc-keys-event，键码 115。设备要在 miniapp 之前建好，
+# 否则应用侧 [YButtonEventAdapter] [init] m_homeModule.init failed 会一直在。
+if [ -x /userdata/fakekeys.bin ]; then
+    for p in /proc/[0-9]*; do
+        c=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)
+        case "$c" in */userdata/fakekeys.bin*) kill "${p#/proc/}" 2>/dev/null;; esac
+    done
+    setsid /userdata/fakekeys.bin adc-keys platform-adc-keys-event 115 \
+        >$LOG/vm-fakekeys.log 2>&1 < /dev/null &
+    i=0
+    while [ $i -lt 30 ] && [ ! -e /dev/input/by-path/platform-adc-keys-event ]; do
+        sleep 0.2
+        i=$((i + 1))
+    done
+    if [ -e /dev/input/by-path/platform-adc-keys-event ]; then
+        echo "x3s342: fake-keys ready (home=115)" >>$LOG/vm-ui.log
+    else
+        echo "x3s342: fake-keys did not create platform-adc-keys-event" >>$LOG/vm-ui.log
+    fi
+fi
+
+cd /oem/YoudaoDictPen/output || exit 1
+
+/usr/bin/runSysconfigMgr >$LOG/vm-sysconfig.log 2>&1 &
+sleep 2
+
+# 音频：固件的 S50-app-launcher 会按板型绑 asound.conf、恢复音量、起
+# SoundPlayer/SoundRecord，那条分支在 VM 上不走，这里照它的做法补。
+# 用的是 patches/asound.conf.vm（prepare.sh 每次开机覆盖到 /userdata/cfg）。
+# 固件那份底本不能直接用：它的 `type hooks` 段要写 Rockchip 功放的
+# "Playback Path" 控件，VM 的 usb-audio 没有，snd_pcm_open 返回 ENOENT，
+# 应用侧就是 openOutputDevice 失败、PCM 一直是 closed。
+ASOUND_VM=/userdata/cfg/asound.conf.vm
+if [ -f "$ASOUND_VM" ]; then
+    mount --bind "$ASOUND_VM" /etc/asound.conf >>$LOG/vm-audio.log 2>&1
+    alsactl restore -f /etc/asound.state.VCherry_3566 >>$LOG/vm-audio.log 2>&1
+    # spk_volume 是应用侧的音量（0~100）。应用从没设置过它的时候这里读到 0，
+    # 照抄下去会把 usb-audio 的输出增益设成最小（-128 dB），整机静音；
+    # 所以 0 和读不到都按 80 处理，并写回去让设置界面和实际音量一致。
+    spk=$(sys_config spk_volume 2>/dev/null)
+    case "$spk" in
+        ''|*[!0-9]*) spk=80 ;;
+    esac
+    [ "$spk" -lt 1 ] && spk=80
+    [ "$spk" -gt 100 ] && spk=100
+    sys_config spk_volume $spk
+    echo "x3s342: spk_volume=$spk" >>$LOG/vm-audio.log
+    hal-audio -D 0 -s $spk >>$LOG/vm-audio.log 2>&1
+fi
+setsid /usr/bin/guardian_run /usr/bin/runSoundPlayer start >$LOG/vm-soundplayer.log 2>&1 < /dev/null &
+sleep 1
+setsid /usr/bin/guardian_run /usr/bin/runSoundRecord start >$LOG/vm-soundrecord.log 2>&1 < /dev/null &
+sleep 1
+# 预加载库：
+#   libvmstorage.so 常开 —— 厂商 getStorageInfo 返回固件写死的 4GB，
+#     设置 → 空间清理 会一直显示「已使用4.0GB/4GB」；这个库换成状态盘的 statvfs。
+#   libvmsn.so 默认关 —— 它会让「我的 / 随身听」等页面在 mounted 阶段报
+#     `cannot read property '$children' of undefined`（根在 store 槽 0x08
+#     readProductAndDeviceInfo 返回 -1）。需要云端设备身份时再开：
+#     touch /userdata/.vm-identity
+VM_PRELOAD=""
+[ -f /userdata/libvmstorage.so ] && VM_PRELOAD=/userdata/libvmstorage.so
+if [ -f /userdata/.vm-identity ] && [ -f /userdata/libvmsn.so ]; then
+    VM_PRELOAD="$VM_PRELOAD:/userdata/libvmsn.so"
+fi
+[ -n "$VM_PRELOAD" ] && export LD_PRELOAD="$VM_PRELOAD"
+setsid /usr/bin/guardian_run /usr/bin/miniapp >$LOG/vm-miniapp.log 2>&1 < /dev/null &
+# 首启补装出厂预置应用（幂等，见 patches/install-presets.sh）
+if [ ! -f /userdata/.vm-presets-installed ] && [ -x /userdata/install-presets.sh ]; then
+    setsid sh /userdata/install-presets.sh >/dev/null 2>&1 < /dev/null &
+fi
+
+echo "x3s342: compositor + miniapp launched" >>$LOG/vm-ui.log
+exit 0

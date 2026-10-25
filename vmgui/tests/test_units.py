@@ -1181,7 +1181,7 @@ class TestFileTransfer(unittest.TestCase):
         留档说明和回执就跟人对不上账。
         """
         from vmgui.console.window import amr_target
-        self.assertEqual(amr_target(r"D:\download\vm\包 A.amr"), "/userdata/包 A.amr")
+        self.assertEqual(amr_target(r"C:\repo\包 A.amr"), "/userdata/包 A.amr")
         self.assertEqual(amr_target("D:/download/vm/包 A.amr"), "/userdata/包 A.amr")
         self.assertEqual(amr_target(r"C:\x\y\miniapp.amr"), "/userdata/miniapp.amr")
 
@@ -2051,6 +2051,8 @@ class TestConsoleKeys(unittest.TestCase):
         self.assertEqual(H.keys_for("x6pro"), {"home": 102, "vol_down": 114, "vol_up": 115})
         self.assertEqual(H.keys_for("s6pro"), {"home": 139, "vol_down": None, "vol_up": None})
         self.assertEqual(H.keys_for("x7"), {"home": None, "vol_down": None, "vol_up": None})
+        self.assertEqual(H.keys_for("x3s342"), {"home": 115, "vol_down": None, "vol_up": None},
+                         "Cherry-3566_V0 的 key config 只有 home=115（那颗 ADC 键），没有音量键")
         win = self._window()
         win._apply_pack("s6pro", announce=False)
         self.assertTrue(win._key_actions["home"].isEnabled())

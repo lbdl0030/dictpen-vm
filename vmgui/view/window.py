@@ -5,9 +5,9 @@ import datetime
 import os
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QSettings, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence
-from PySide6.QtWidgets import QLabel, QMainWindow, QStatusBar
+from PySide6.QtCore import QEvent, QObject, QPointF, QSettings, QSize, QTimer, Signal
+from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QKeySequence
+from PySide6.QtWidgets import QLabel, QMainWindow, QSizePolicy, QStatusBar
 
 from ..backends.base import PointerMode
 from ..core import events as ev
@@ -64,6 +64,11 @@ class MainWindow(QMainWindow):
         self._settings = QSettings("vmgui", "vmgui")
 
         self.canvas = Canvas(cfg)
+        # 画布不许按 sizeHint 把窗口撑大：窗口被屏幕夹小之后，若画布仍按 960×2 的
+        # 尺寸排布，它会比窗口客户区更大 —— 多出来的部分被窗口裁掉，看着就是"画面被裁"
+        # （2026-10-25 p5 实测：窗口 1667×833，画布却是 1920×1352）。
+        # Ignored 让布局永远按可用区给画布尺寸，缩放交给 paintEvent 里的 fit。
+        self.canvas.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.setCentralWidget(self.canvas)
         self.setWindowTitle("vmgui — QEMU 虚拟机客户端")
         self.grab = PointerGrab(self.canvas)
@@ -259,15 +264,33 @@ class MainWindow(QMainWindow):
         self._frames += 1
         self.canvas.set_frame(frame)
 
+    def _preferred_window_size(self, gw: int, gh: int) -> QSize:
+        """窗口该多大：guest × initial_zoom，再夹到屏幕可用区。
+
+        首帧那一刻画布还没记住 guest 尺寸（`oriented_size()` 为空、sizeHint 回兜底
+        720×400），照它定窗口会把画面缩到 0.7 倍且之后不再重算（2026-10-25 p5 实测）。
+        预缩放超过屏幕时也要夹下来：窗口被系统夹小、画布却按大尺寸画，就是"右边/下边被裁"。
+        """
+        z = float(self.cfg.get("display.initial_zoom", 2.0))
+        if gw > 0 and gh > 0:
+            scr = self.screen() or QGuiApplication.primaryScreen()
+            if scr is not None:
+                avail = scr.availableGeometry()
+                zmax = min((avail.width() - 40) / gw, (avail.height() - 140) / gh)
+                if zmax > 0:
+                    z = min(z, zmax)
+            return QSize(max(200, int(gw * z)), max(150, int(gh * z)))
+        return QSize(720, 400)
+
     def _on_resolution(self, w: int, h: int) -> None:
         prev, self._guest_size = self._guest_size, (w, h)
         self.canvas.updateGeometry()
         resize = (prev and prev != (w, h)) or not self._geometry_restored
         if resize and not self.isFullScreen() and not self.isMaximized():
-            self.resize(self.canvas.sizeHint())
+            self.resize(self._preferred_window_size(w, h))
             self._geometry_restored = True
-        log.info("分辨率变为 %dx%d（画布 %d x %d）", w, h, self.canvas.width(),
-                 self.canvas.height())
+        log.info("分辨率变为 %dx%d（画布 %d x %d，窗口 %d x %d）", w, h, self.canvas.width(),
+                 self.canvas.height(), self.width(), self.height())
         self._refresh_status()
 
     def _on_state(self, state: str, detail: str) -> None:
@@ -388,7 +411,7 @@ class MainWindow(QMainWindow):
     def _reset_view(self) -> None:
         self._set_mode("fit")
         if not self.isFullScreen():
-            self.resize(self.canvas.sizeHint())
+            self.resize(self._preferred_window_size(*self._guest_size))
 
     def _screenshot(self) -> None:
         img = self.canvas.current_image()

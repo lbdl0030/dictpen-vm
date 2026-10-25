@@ -1,0 +1,86 @@
+# 固件包：p5 —— 词典笔 P5（YDPP5-1 / Almond 板 / RK3566 / OS 3.5.0）
+#
+# 来源：固件库 `Almond-OTA-OS99.99.91` 全量 OTA（ABUP 测试通道号 99.99.91，
+# rootfs `/Version` 实测 3.5.0，Build 2025-12-18）。**P 系产品线首台**。
+# 型号判定：install 产品注册表 `YDPP5-1 → OVERHEAD_P51_SKU_CHN_PRO`（productId 1654930955）
+# + DTB `Rockchip RK3566 Youdao Almond Board`（映射表 → Almond_V0）。
+#
+# 切分（RKAF @ 0xb4a26，RK3566 标准布局，偏移相对 RKAF）：
+#   boot_a   pos=0xfb6800（绝对 0x106b226）size=0xc04000 —— FIT（kernel+多板 DTB）
+#   system_a pos=0x1bba800（绝对 0x1c6f226）size=0x7d000000 —— 原始 ext4（无 uresource 分区）
+# 与 x6pro 同代同构（RK356x + ext4 + weston + miniapp + xdg-shell），
+# 面板同为 480×960 竖屏 DSI（横用 960×480），cfg.json 逻辑屏同为 960×266/yoffset=107。
+# 用户态 aarch64 glibc。
+
+name    = "p5"
+note    = "词典笔 P5 / YDPP5-1 / Almond / RK3566 / OS 3.5.0（OTA 99.99.91 通道）"
+version = "3.5.0"
+
+[platform]
+soc     = "rk3566"
+runtime = "rockchip-linux-ext4"
+kernel  = ""
+initrd  = ""
+
+[image]
+rootfs = "images/p5-rootfs.img"
+boot   = "images/p5-boot.img"
+
+[display]
+# DTB 面板 480×960 竖屏 DSI，横用 960×480（与 x6pro 同款屏型）；
+# 固件 cfg.json 逻辑屏 960×266 + yoffset 107 + direction 270，行为同 x6pro。
+xres     = 960
+yres     = 480
+rotation = 0
+bpp      = 32
+
+[audio]
+# youdao_hal_audio_config 的 Almond_V0 节：mic=card0/sub1、speaker=card1、
+# 数字耳机探测 /sys/class/sound/card2 → 挂 3 块 QEMU 卡。
+# speaker_vol_ctl_numid 原值 6，QEMU usb-audio 的音量控件是 numid 3，
+# prepare.sh 已按节改写（x6pro 同款 awk，只动 Almond_V0 节）。
+cards = 3
+
+[adapt]
+battery     = true                          # 伪造健康电量（VM 没有 RK805 PMIC）
+license     = true                          # 开机写开发凭证
+ap          = true                          # wlan1 虚拟热点
+# 触摸桥用 C 版 touchbridge.bin（x3s342 同款，参数化宽高）：P5 的 buildroot 没有
+# perl，框架自带的 perl 版 bridge 起不来（/usr/bin/perl 不存在）。S50vm-ui 起
+# 桥后把 vm-touch 软链到 cfg 的 tp 路径 axs_ts。
+cfg_overlay = "patches/cfg.json.overrides"  # tp 指 axs_ts（桥的落点），方向/偏移归零
+hooks       = ["patches/prepare.sh"]
+extra       = ["weston.tar", "patches/weston9.tar", "patches/S45vm-wifi", "patches/S50vm-ui",
+               "patches/touchbridge.bin", "patches/touchbridge.c", "patches/99-axs-ts.rules",
+               "patches/libvmstorage.so"]
+
+[adapt.replace]
+# OCR 栈桩化（s7pro §4 / x6pro DEVLOG §5.3 同款方案）：真 libyocr/libYoudaoStitch
+# 的初始化链要 RK3566 NPU（rknn 模型加载即 SIGSEGV；藏掉则 dlopen 失败、
+# TornLineRKNN 空模型路径也崩）。规则：导出函数名含 init/open/create/load/setup/
+# start/connect/begin/prepare/config → 返回 -1，其余返回 0；保留构造器（中和构造器
+# 会 SIGILL——x6pro 实测）；同尺寸就地覆写（生成器在 ota 工作目录的 `_stub64.py`，
+# 1458/1037 个函数）。桩化后应用走「OCR 不可用」容忍路径，扫描功能不可用。
+"patches/libyocr.so"           = "/oem/YoudaoDictPen/output/libs/libyocr.so"
+"patches/libYoudaoStitch.so"   = "/oem/YoudaoDictPen/output/libs/libYoudaoStitch.so"
+# gsensor_get_data 桩化为 return 0（@0x1c65c，mov w0,#0; ret）：VM 没有 G 传感器，
+# 轮询线程在传感器描述表上越界索引 → SIGSEGV（breakpad dmp 定位，崩溃线程
+# pc=libydhal_devices+0x1c84c）。桩后轮询拿到空数据，线程不再崩。
+"patches/libydhal_devices.so"  = "/usr/lib/libydhal_devices.so"
+# librknnrt 桩化（两处同 md5 副本都换）：libyocr/libYoudaoStitch 的导出虽已桩化，
+# 但 libYoudaoStitch 保留的构造器仍起线程直接走内部代码加载 RKNN 模型
+# （ShakeClassRKNN 等）→ librknnrt 内部 NPU 路径 SIGSEGV。把 RKNN 运行时本身
+# 桩掉（rknn_init 返回 -1 等），模型加载彻底失败，NPU 依赖功能整体标记不可用。
+"patches/librknnrt.so"         = "/usr/lib/librknnrt.so"
+"patches/librknnrt-oem.so"     = "/oem/YoudaoDictPen/output/libs/librknnrt.so"
+# libyshake_class 桩化：ShakeClassRKNN（摇一摇分类，RKNN 模型）住在单独的
+# libyshake_class.so；rknn_init 桩后它不检查失败继续用空上下文仍崩，整库桩化。
+"patches/libyshake_class.so"   = "/oem/YoudaoDictPen/output/libs/libyshake_class.so"
+
+[checks]
+"images/p5-rootfs.img" = { md5 = "6e00f9996b9514ad7f6284d7b1f753a6" }
+"images/p5-boot.img"   = { md5 = "0e39cfa627604349ec991e91d2191325" }
+
+[state]
+# rootfs 2 GiB、预置包走 /userdisk，给 2 GiB 状态盘（x3s342 同档）。
+size_mb = 2048

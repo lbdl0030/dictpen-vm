@@ -20,7 +20,7 @@
 | 触控（`dpctl tap` → 页面跳转） | ✅ |
 | miniapp 稳定运行（无崩溃循环，`MiniappCreateFinishFlag` 出现） | ✅ |
 
-首屏验证截图：`vm/x7-screen2.png`（有道小P / 查词翻译 / AI拍照 / 随身听），
+首屏验证截图：`vm/shots/x7-screen2.png`（有道小P / 查词翻译 / AI拍照 / 随身听），
 `dpctl tap 510 133` 能进查词应用（联网提示属 headless 未连 Wi-Fi 的正常现象）。
 
 ## 修复一：`Cannot find plane`（plane 搜索 fourcc）
@@ -135,7 +135,7 @@ falcon 的 DRM 日志全部丢失。定位过程（用镜像自带的 gdb，注�
 python scripts\dpctl.py packs x7
 python scripts\dpctl.py up --pack x7 --display none
 python scripts\dpctl.py wait --timeout 240
-python scripts\dpctl.py screenshot --out vm\x7.png
+python scripts\dpctl.py screenshot --out vm\shots\x7.png
 python scripts\dpctl.py tap 510 133          :: 点"查词翻译"
 ```
 
@@ -159,7 +159,7 @@ python scripts\dpctl.py tap 510 133          :: 点"查词翻译"
   yoffset 0` → **没有字盒**（与 x6pro 不同，见 `packs/x6pro/DEVLOG.md` §7.10）。
 - **"右边被切"是首页自己的 coverflow 卡片行**：4 张卡（有道小P／查词翻译／AI拍照／随身听），
   中间那颗被放大（当前焦点），第 4 张超出 960 被切 —— 行宽 > 屏宽是固件的排版，不是我们裁的
-  （`vm/_x7_home2.png`）。
+  （`vm/shots/_x7_home2.png`）。
 - **坐标投递是准的**（这条是重点）：抓桥发布的 `axs_ts`，`tap 300 60` → app 收到
   `ABS_X=300`、`ABS_Y=60`、`BTN_TOUCH=1`、`BTN_TOUCH=0` —— 一个像素不差（`panel 960x266`、
   `source 0..32767 -> 959 x 265` 见 `/tmp/touchbridge.log`）。
@@ -197,7 +197,7 @@ python scripts\dpctl.py tap 510 133          :: 点"查词翻译"
 **验证**（8G 状态盘）：
 - app 启动约 470 s（既有现象），首页出画后 `grep vmstorage /proc/<pid>/maps` 命中
   `/usr/lib/vmstorage/libvmstorage.so`。
-- 设置 → 空间清理：**已使用 1.3GB/8GB**（`vm/_x7_pack_storage2.png`）。
+- 设置 → 空间清理：**已使用 1.3GB/8GB**（`vm/shots/_x7_pack_storage2.png`）。
 - 关于页的「存储容量」与空间清理走同一个 `getSystemInfo`，未单独截到中间滚动位置
   （wheel 单步跨行）；以主入口为准。
 - 单测：`vmgui.tests.test_units.TestX7StorageShim`。
@@ -255,7 +255,7 @@ global.verifyLicense  false redo verify
   播放页控制栏会自动隐藏，点一下歌词区先让它出现，再按中间播放键。
 - SoundPlayer 日志：`Audio open : tc_digital!` →
   `open=======success`；宿主默认端点峰值 **74.4%**，界面保持暂停键。
-- 截图：`vm/_x7_final_playing.png`；峰值输出 `vm/_x7_peak_final.txt`。
+- 截图：`vm/shots/_x7_final_playing.png`；峰值输出 `vm/_x7_peak_final.txt`。
 
 **排查工具（未进包）**：`vm/_x7_hal/` 保留了 HAL 库与音频配置副本；
 用 aarch64 `LD_PRELOAD` 包住 `snd_pcm_open` 抓到实际设备名就是

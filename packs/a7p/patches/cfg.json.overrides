@@ -1,0 +1,12 @@
+# a7p（Y09P 板）：direction=0（VM 无平面旋转，1:1 写入）；
+# bpp=32（guest 平面只吃 32 位格式，固件原值 16）；
+# tp 保持固件原值 /dev/input/by-path/axs_ts —— DTB 的触摸 IC 就是 axs15206，
+# 与 a7pro 同路径，touchbridge.pl 建的 axs_ts_pen 会软链到它。
+# width/height：固件原值 1020x240，但它的控制中心在 240 高下会被切掉最后一行
+# （Wi-Fi/蓝牙/亮度 只露上半截）。VM 屏高按 266 给，cfg 跟着改成 266，
+# 与 pack.toml 的 yres 一致（触摸桥也按这份 cfg 算坐标）。
+width=1020
+height=266
+direction=0
+bpp=32
+tp=/dev/input/by-path/axs_ts

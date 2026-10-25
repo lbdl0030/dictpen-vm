@@ -104,10 +104,14 @@ def main():
     add_dir("tmp"), add_dir("mnt"), add_dir("run"), add_dir("ro")
     add_dir("bin")
     pubkey = os.path.join(TOOLS, "ssh", "id_devvm.pub")
+    pubkey_ecdsa = os.path.join(TOOLS, "ssh", "id_devvm_ecdsa.pub")
     init_txt = open(INIT, "r", encoding="utf-8").read()
     if os.path.exists(pubkey):
         init_txt = init_txt.replace("__DICTPEN_PUBKEY__",
                                     open(pubkey).read().strip())
+    if os.path.exists(pubkey_ecdsa):
+        init_txt = init_txt.replace("__DICTPEN_PUBKEY_ECDSA__",
+                                    open(pubkey_ecdsa).read().strip())
     add_file("init", init_txt.encode("utf-8"))
     add_file("bin/busybox", open(BUSYBOX, "rb").read())
 

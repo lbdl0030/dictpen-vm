@@ -68,6 +68,8 @@ from runtimes import BootContext, UnsupportedPlatform   # noqa: E402
 QEMU = os.path.join(ROOT, "tools", "msys2", "ucrt64", "bin", "qemu-system-aarch64.exe")
 QEMU_IMG = os.path.join(ROOT, "tools", "msys2", "ucrt64", "bin", "qemu-img.exe")
 KEY = os.path.join(ROOT, "tools", "ssh", "id_devvm")
+# 备用身份：部分固件的 dropbear 没编 ed25519，只认 ecdsa-sha2-*
+KEY_ECDSA = os.path.join(ROOT, "tools", "ssh", "id_devvm_ecdsa")
 # 宿主 sftp：`put`/`get` 的首选通道（路径带空格/中文也安全，二进制安全）。
 # 客机侧 serve 它的是 dropbear + /usr/libexec/sftp-server（千问在 a6pro 上实测读写都通）；
 # ⚠ 其余六包有没有 sftp-server 是**包侧事实**，没测过的不许外推。
@@ -261,10 +263,14 @@ def vm_running():
 
 
 def ssh_base(interactive=False):
-    a = ["ssh", "-i", KEY,
+    keys = [KEY] + ([KEY_ECDSA] if os.path.exists(KEY_ECDSA) else [])
+    a = ["ssh"] + [x for k in keys for x in ("-i", k)] + [
          "-o", "StrictHostKeyChecking=no",
          "-o", f"UserKnownHostsFile={SSH_KNOWN_HOSTS}",
          "-o", "ConnectTimeout=8",
+         # 客机 dropbear 是老版本，只提供 ssh-rsa(SHA-1) 主机键；OpenSSH 9+
+         # 默认拒绝它，不放开就永远是 kex_exchange_identification 失败
+         "-o", "HostKeyAlgorithms=+ssh-rsa",
          "-p", str(SSH_PORT)]
     a += [] if interactive else ["-o", "BatchMode=yes", "-T"]
     a += [f"root@127.0.0.1"]
@@ -441,6 +447,79 @@ def find_pyside_python():
         if p.returncode == 0:
             return c
     return None
+
+
+def _win_window_for_pid(pid):
+    """某进程最上层的可见窗口 hwnd（Windows）；找不到或非 Windows 返回 0。"""
+    if not is_windows():
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        return 0
+    user32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def cb(hwnd, _lparam):
+        wpid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
+        if wpid.value == pid and user32.IsWindowVisible(hwnd):
+            found.append(hwnd)
+        return True
+
+    user32.EnumWindows(cb, 0)
+    return found[0] if found else 0
+
+
+def raise_window(hwnd) -> bool:
+    if not hwnd:
+        return False
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        user32.ShowWindow(hwnd, 9)              # SW_RESTORE
+        user32.SetForegroundWindow(hwnd)
+        return True
+    except OSError:
+        return False
+
+
+def cmd_attach(args):
+    """把**实时画面**调出来（vmgui 窗口，不是截图轮询）。
+
+    三种情况分开说：已有 vmgui → 把窗口抬到前台；QMP 空着（VM 是 --display none 起的）
+    → 拉一个 vmgui 连上去；控制台占着 QMP → 画面在控制台里，不能开第二个前端。
+    """
+    if not vm_running():
+        print("dpctl: 虚拟机没在跑；先 run-vm.cmd（等于 `up`）")
+        return 1
+    owner = qmp_owner() or ""
+    if owner.startswith("vmgui"):
+        pid = int(owner.split()[-1])
+        if raise_window(_win_window_for_pid(pid)):
+            print("已把实时画面窗口调到前台。")
+            return 0
+        print("vmgui 在跑，但没找到它的窗口（可能被最小化或在别的虚拟桌面）。")
+        return 1
+    if owner.startswith("console"):
+        print("画面现在由控制台窗口负责（QMP 只服务一个客户端）：切到控制台即可；"
+              "或者先关掉控制台再跑 run-vm.cmd。")
+        return 1
+    py = find_pyside_python()
+    if not py:
+        print("dpctl: 找不到能 import PySide6 的 python，无法打开实时画面")
+        return 1
+    name = current_pack_name() or ""
+    profile = ""
+    try:
+        profile = packlib.pick_pack(name).client_profile or ""
+    except PackError:
+        pass
+    # 和 `up` 走同一个入口：profile 跟着包走，画面参数（旋转/通道序）不会和起机时不一致。
+    start_vmgui(py, profile, name)
+    return 0
 
 
 def start_vmgui(python_cmd, profile="", pack_name=""):
@@ -1204,10 +1283,14 @@ def cmd_pack(args):
 
 def cmd_up(args):
     if vm_running():
-        print(f"VM already running (pid {read_pid() or qemu_pids()}); use `dpctl down` first")
-        return 1
+        # 双击 run-vm.cmd 的本意是「看这台笔」。已经在跑的时候只丢一句英文报错、然后关窗，
+        # 人就以为坏了（2026-10-25 人报）。这里调实时画面（vmgui），不是截图轮询。
+        print(f"虚拟机已在运行（pid {read_pid() or qemu_pids()}）。")
+        return cmd_attach(args)
     try:
-        pack = packlib.pick_pack(args.pack)
+        # 没给 --pack 时先试"上次用的那台"：装了第二个包之后，双击 run-vm.cmd
+        # （等于不带参数跑 up）原本直接报"有多个包"，窗口一闪就关，看着像没反应。
+        pack = packlib.pick_pack(args.pack or current_pack_name())
     except PackError as e:
         print(f"dpctl: {e}")
         return 2
@@ -2457,6 +2540,9 @@ def main():
     p.add_argument("--zoom", type=int, default=2, help="upscale factor (default 2)")
     p.add_argument("--interval", type=float, default=1.0, help="refresh seconds")
     p.set_defaults(func=cmd_view)
+
+    p = sub.add_parser("attach", help="把已启动的 VM 的实时画面窗口调出来（vmgui）")
+    p.set_defaults(func=cmd_attach)
 
     p = sub.add_parser("pointer",
                        help="touch-feedback marker drawn over the QEMU window")

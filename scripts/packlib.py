@@ -87,6 +87,12 @@ class Pack:
         self.runtime = plat.get("runtime", "")
         self.rootfs = _resolve(img.get("rootfs"), self.dir)
         self.boot = _resolve(img.get("boot"), self.dir)
+        # 额外只读镜像（例如厂商的 uresource 分区）：按声明顺序作为 /dev/vdc、vdd…
+        # 挂给 guest，具体挂到哪由包自己的钩子决定。
+        extra = img.get("extra") or []
+        if isinstance(extra, str):
+            extra = [extra]
+        self.extra_images = [_resolve(x, self.dir) for x in extra]
         # 留空 = 用 runtime 的默认内核 / 框架通用 initramfs
         self.kernel = _resolve(plat.get("kernel"), self.dir)
         self.initrd = _resolve(plat.get("initrd"), self.dir)

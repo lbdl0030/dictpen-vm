@@ -51,8 +51,8 @@ yres=260`，并且 `cfg_overlay` 要**同时**覆盖 `width=640` / `height=260` 
 | 能力 | 状态 |
 |------|------|
 | 引导（ext4 root + overlay + 状态盘） | ✅ |
-| UI 上屏 | ✅ 640×260 完整正立（`vm/s6pro-landscape.png`） |
-| 触摸 | ✅ `dpctl tap 110 130` → 进「规范扫描」页（`vm/s6pro-tap.png`） |
+| UI 上屏 | ✅ 640×260 完整正立（`vm/shots/s6pro-landscape.png`） |
+| 触摸 | ✅ `dpctl tap 110 130` → 进「规范扫描」页（`vm/shots/s6pro-tap.png`） |
 | 设置存储 | ✅ 跟随 VM 状态盘（shim；空间清理与关于→存储容量都显示 0.5GB/8GB，见 §14） |
 | 本地翻译（NMT） | ⛔ localdict 缺失，shim 跳过补丁加载；词典在线功能正常 |
 | adb | `S00adbd`（TCP），`dpctl adb` |
@@ -96,8 +96,8 @@ tp 路径（`/dev/input/by-path/axs_ts`）就够了，所以 `[adapt].touchbridg
 
 **验证**：fb0 `640,260 / stride 2560`；cfg.json 覆盖后为 `width 640 / height 260 /
 direction 0`；miniapp 常驻不重启；截图三张卡片（查词翻译 / 语音助手 / 有道随身听）
-完整正立（`vm/s6pro-landscape.png`，修复前被裁的样子见 `vm/s6pro-portrait.png`）；
-`dpctl tap 110 130` 正常进「规范扫描」页（`vm/s6pro-tap.png`）。
+完整正立（`vm/shots/s6pro-landscape.png`，修复前被裁的样子见 `vm/shots/s6pro-portrait.png`）；
+`dpctl tap 110 130` 正常进「规范扫描」页（`vm/shots/s6pro-tap.png`）。
 
 **教训**：这台机器**不能用"面板扫描方向"当虚拟屏尺寸**。判断依据是 app 的
 `vinfo` 请求（它认 cfg.json），不是 DTB/`cvifb` 的扫描参数——`cvifb start_x=110
@@ -155,7 +155,7 @@ python scripts\dpctl.py sh -c "miniapp_cli install /etc/miniapp/resources/preset
 ```
 
 装完注册表回到 `version=2.1.1`，再走 下拉菜单 → 齿轮 → 翻到底 → 关于：**页面正常**
-（型号 `YDPS6-1 CHN PRO`、版本 `词典笔OS 4.0.5`，`vm/_s6_about_fixed.png`），日志零
+（型号 `YDPS6-1 CHN PRO`、版本 `词典笔OS 4.0.5`，`vm/shots/_s6_about_fixed.png`），日志零
 `could not load module`。动手前把旧包整目录备份到 `/userdata/_qwen_bak_s6_setting`（4.6 MB，要退回去就
 `cp -a` 回 `pkg/8080272425914438`）。
 
@@ -164,7 +164,7 @@ python scripts\dpctl.py sh -c "miniapp_cli install /etc/miniapp/resources/preset
 `{"almond": true, "apollo": false, "coco": true, "x3s": true}` —— **没有 `plum_platform` 这个键**，
 而 HOME（查词翻译）的字节码里只认 6 个板名（almond/apollo/coco/melon/plum/x3s，`pear` 等都不在表里）。
 本机自报 `get_pcba_version` = **Plum_V0**，所以按板型开关它就不该上桌面；真入口是**下拉菜单那颗齿轮**
-（实测可用：`vm/_s6_top.png` = 下拉面板与那颗齿轮，`vm/_s6_setting.png` = 设置首屏）。
+（实测可用：`vm/shots/_s6_top.png` = 下拉面板与那颗齿轮，`vm/shots/_s6_setting.png` = 设置首屏）。
 2.7.3 的 `addDesktop` 同样没有 plum —— 厂商就没给这块板开。
 
 **还没查完的（别当成已修）**：把"盘上版本"与"本机预设版本"逐条对了一遍
@@ -183,7 +183,7 @@ python scripts\dpctl.py sh -c "miniapp_cli install /etc/miniapp/resources/preset
 - **做法**：`patches/vm-keys.pl` + `vm-keys-apply` + `vm-keys.env` + `vm-keys.sh` 钩子。
   板型串 `Cvitek Cv1826 for Youdao Cherry V0 version`；`runDictPen.sh` 在 miniapp 之前调用
   `vm-keys-apply`（显示初始化已完成，不能再提前到 S00/S21）。
-- **验证**：冷启动后查词翻译 → 桌面（`vm/_s6_new_after.png`）；控制台工具条只亮 Home。
+- **验证**：冷启动后查词翻译 → 桌面（`vm/shots/_s6_new_after.png`）；控制台工具条只亮 Home。
 - 快速启动可选：`dpctl fast save --pack s6pro`（无音频，见 README 与台账 Q93）。
 
 ## 14. 设置存储跟随 VM 状态盘（Q105，2026-10-21）
@@ -227,9 +227,9 @@ python scripts\dpctl.py sh -c "miniapp_cli install /etc/miniapp/resources/preset
 **验证**（2026-10-21，8GB 状态盘、设置 2.1.1）：
 - `/proc/<miniapp.real>/maps` 命中 `/usr/lib/vmstorage/libvmstorage-armhf.so`；
   `df /userdata` = 7.8G/452.8M 用。
-- 设置 → 空间清理：**已使用 0.5GB/8GB**（`vm/_s6_storage_shim.png`）。
+- 设置 → 空间清理：**已使用 0.5GB/8GB**（`vm/shots/_s6_storage_shim.png`）。
 - 设置 → 关于 → 存储容量：**8GB**，点进去同样 **0.5GB/8GB**
-  （`vm/_s6_about_shim2.png`、`vm/_s6_about_storage_shim.png`）。
+  （`vm/shots/_s6_about_shim2.png`、`vm/shots/_s6_about_storage_shim.png`）。
 - 从卡片内部上拖才滚得动设置列表（从两列之间的空隙拖会回桌面）；
   下拉菜单 → 齿轮 才是设置入口（桌面无设置卡片）。
 - 单测：`vmgui.tests.test_units.TestS6StorageShim`。
@@ -245,8 +245,8 @@ speaker=card2、数字耳机=card3**，`/etc/asound.conf` 的 `spk_softvol` 也�
 - 入口：随身听 → 我的 → USB 上传 → `I Wanna Know.mp3`，点歌词区显示控制栏后按播放。
 - SoundPlayer：`open=======success`；宿主端点峰值 **78.6%**（冷启动复验），
   手工热插到 4 卡时是 85.3%。界面会保持播放/暂停切换。
-- 证据：`vm/_s6_cold_playing.png`、`vm/_s6_cold_peak.txt`（冷启动）、
-  `vm/_s6_play4.png`、`vm/_s6_peak4.txt`（热插）。
+- 证据：`vm/shots/_s6_cold_playing.png`、`vm/_s6_cold_peak.txt`（冷启动）、
+  `vm/shots/_s6_play4.png`、`vm/_s6_peak4.txt`（热插）。
 - 顺带一个观察：这台播放时应用会把**宿主默认端点的音量**改掉（本次从 80% 变 15%），
   说明它的音量写入能落到宿主设备；这不代表音量联动已经做完，只是链路通了。
 
@@ -264,6 +264,6 @@ speaker=card2、数字耳机=card3**，`/etc/asound.conf` 的 `spk_softvol` 也�
 "ret": 0}`、`packages.json` 里随身听与设置都回到 **2.1.1**、标记文件生成；
 把 `libjsapi_mediaplayer_822330678.so` 里的 `libdl.so.2` 手工改回 `libyocr.so`（grep 2 处）
 再 `killall -9 miniapp.real`，重启后自动变回 0 处 —— 补丁分支实测生效。
-首页截图 `vm/_s6_after_pin.png`。
+首页截图 `vm/shots/_s6_after_pin.png`。
 
 随身听的 USB 上传目录是 `/userdisk/Music/`（大写 M）。

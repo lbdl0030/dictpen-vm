@@ -35,7 +35,7 @@ X5pro（板型 **Cherry_Cvitek_1826_V1_5G**，Cvitek **CV1826** 平台，rootfs 
 | 能力 | 状态 |
 |------|------|
 | 引导（ext4 root + overlay + 状态盘） | ✅（state 2 GiB；老盘 512M 重建后生效） |
-| UI 上屏 | ✅ 800×254 桌面三卡片完整正立（`vm/x5-home.png` / `vm/x5-v3-home.png`） |
+| UI 上屏 | ✅ 800×254 桌面三卡片完整正立（`vm/shots/x5-home.png` / `vm/shots/x5-v3-home.png`） |
 | OCR | ⛔ 桩化（同 s7pro，无 CVITEK TPU；未桩化时 miniapp assert 秒崩重启循环） |
 | SSH（arm64 dropbear，:22） | ✅ 开机自启（`S00dropbear: up`），`dpctl sh/put/get` 全走 SSH |
 | 网络 eth0 | ✅ 原生可用（S40network/S41dhcpcd 在 VM 内核正常，**不需要** s7pro 的 S00net-up） |
@@ -89,10 +89,10 @@ libyocr 初始化链要 CVITEK TPU（/dev/ion、/dev/cvi-tpu0），VM 没有。
 这台 app 的 UI 版式是**横屏 800×254**：
 
 - 竖屏 254×800 直接给：app 不崩（vinfo 协商成功）但 UI 以 800 宽版式写进
-  254 宽缓冲 —— 斜切+裁剪（`vm/x5-first.png`）；
+  254 宽缓冲 —— 斜切+裁剪（`vm/shots/x5-first.png`）；
 - 正确姿势（s6pro README §5 同一配方）：`[display]` 800×254（EDID）+
   cfg_overlay `width=800/height=254/direction=0` —— 虚拟屏 = fb = UI 版式，
-  1:1 写入，完整正立（`vm/x5-home.png`）。
+  1:1 写入，完整正立（`vm/shots/x5-home.png`）。
 
 ## 6. 触摸：已通（根因与修法见 §6.7；§6.1–§6.6 是排查过程记录）
 
@@ -379,7 +379,7 @@ app 直接是 HOME（8080222437664451）。a7pro 修好后与之一致。
 **修复**：把那两段路径补回去（现在就是上面那一行，别删）。判断是否生效：
 
 ```bat
-python scripts\dpctl.py screenshot --out vm\x.png      :: 400 字节纯黑 = 没好；~100 KB = 桌面
+python scripts\dpctl.py screenshot --out vm\shots\x.png      :: 400 字节纯黑 = 没好；~100 KB = 桌面
 python scripts\dpctl.py sh -c "grep -c 'could not load module' /userdata/applog/DictPen_*.log"
 python scripts\dpctl.py sh -c "grep -c 'launchApp fail'      /userdata/applog/DictPen_*.log"
 ```
@@ -486,7 +486,7 @@ grep -c Segmentation /userdata/applog/DictPen_*.log = 0     （navToApp 2 次，
   板型串 `Cvitek Cv1826 for Youdao Cherry V0 version`。本机首次 app 启动前换 model 会黑屏，
   因此由 `S50vm-keys` 等首 app 起来后 apply、停掉 runDictPen 守护链与 app、直接启动一个
   miniapp（避免守护链与兜底各起一个）。
-- **验证**：冷启动后查词翻译 → 桌面（`vm/_x5_final_after.png`）；单实例；控制台只亮 Home。
+- **验证**：冷启动后查词翻译 → 桌面（`vm/shots/_x5_final_after.png`）；单实例；控制台只亮 Home。
 - 快速启动可选：`dpctl fast save --pack x5pro`（无音频，见 README 与台账 Q93）。
 
 
@@ -505,9 +505,9 @@ glibc 2.23**；一旦覆盖存储符号，`loadNmtPatch` 在 `/userdisk/uresourc
 拷进 `$TARGET`（`S00replace` 只覆盖已存在目标）。
 
 **验证**（状态盘 1GB）：`df /userdata` = 990.7M/398.4M 用。
-- 设置 → 空间清理：**已使用 0.4GB/1GB**（`vm/_x5_storage_shim3.png`）。
+- 设置 → 空间清理：**已使用 0.4GB/1GB**（`vm/shots/_x5_storage_shim3.png`）。
 - 设置 → 关于 → 存储容量：**1GB**，点进去同样 **0.4GB/1GB**
-  （`vm/_x5_about_shim2.png`、`vm/_x5_about_storage_shim.png`）。
+  （`vm/shots/_x5_about_shim2.png`、`vm/shots/_x5_about_storage_shim.png`）。
 - 设置列表要从卡片内部上拖才滚得动（通用 `swipe.py` 即可，x5 走 BTN_TOUCH 桥）；
   点「空间清理」后要等 2 s 再截图。
 - 这台设置包是 **1.5.2**（OS 3.4.6 自带），没有 s6pro 的 2.1.6 自动升级问题，本轮未动更新。

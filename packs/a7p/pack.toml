@@ -1,0 +1,79 @@
+# 固件包：a7p —— 词典笔 A7P（YDPA7-2 / Y09P 板 / RV1106 / OS 4.13.2）
+#
+# 来源：固件库 `Y09P_RV1106-OTA-OS99.99.91` 全量 OTA（ABUP 测试通道号 99.99.91，
+# rootfs `/Version` 实测 4.13.2，Build 2026-08-11）。型号判定（三方互证）：
+#   * install.img 里 ota_mgr 产品注册表：`YDPA7-2 → OVERHEAD_Y09P_SKU_CHN_PRO/PLUS/STD`
+#   * 固件皮肤表有独立的 theme-y09p（a7pro 那台是 theme-y09）
+#   * DTB `Rockchip RV1106 for Y09P V10 Board`，面板 240×1020 竖屏（横用 1020×240）
+# 与 packs/a7pro 不是同一台：a7pro 模拟的是词典笔 A7（YDPA7-1 / Y09 板 / 640×172 /
+# OS 4.13.0）——包名带 "pro" 是历史叫法，别被带偏。
+#
+# 切分：RKAF @ 0x2da26（env.img 风格头），分区偏移相对 RKAF：
+#   rootfs_a pos=0x9b1800（绝对 0x9df226）size=0x3e2b7000 —— 明文 erofs，未压缩
+#   boot_a   pos=0x637000（绝对 0x664a26）size=0x37a800   —— 裸 DTB（非 FIT，开头另有
+#             一个 1536B 的 uboot stub DTB，真板级 DTB 在 +0x800）
+# 用户态 uClibc armhf（同 a6pro）；本机 PCBA 号 Y09P_RV1106_V0。
+
+name    = "a7p"
+note    = "词典笔 A7P / YDPA7-2 / Y09P / RV1106 / OS 4.13.2（OTA 99.99.91 通道）"
+
+[platform]
+soc     = "rv1106"
+runtime = "rv1106-linux-erofs"
+
+[image]
+rootfs = "images/a7p-rootfs.img"
+boot   = "images/a7p-boot.img"
+
+[display]
+# 固件 cfg.json 原值 width=1020 height=240 direction=270（DTB 面板 240×1020 竖屏），
+# 与 s7pro 同形状；VM 里由 cfg_overlay 落到 direction=0（不做平面旋转）。
+# yres 取 266（不是 DTB 的 240）：固件自带的控制中心/下拉面板在 240 高下最后一行
+# 会被切掉（设置/音量 那两行之后，Wi-Fi/蓝牙/亮度 只露出上半截，2026-10-25 截图
+# vm/_a7p_cc_full.png）。同代的 x7 也是 960×266，按 266 给足。
+xres     = 1020
+yres     = 266
+rotation = 270
+bpp      = 32
+# RV1106 falcon 按 RGBA 写、bochs 按 BGRA 扫（a6pro/a7pro 实测红蓝颠倒）；
+# 由 vmgui/dpctl 在宿主呈现时交换 R/B，客机帧不动。
+swap_rb  = true
+
+[audio]
+# 固件 asound：speaker 的 Master Playback Volume 在 card 1、数字耳机 dhs_* 走 hw:2,0
+# （与 a7pro 同构）。QEMU card0 是宿主回放，1/2 由框架补齐。
+cards = 3
+
+[adapt]                                        # a7pro 同族的经验适配
+touchbridge = "patches/touchbridge.pl"         # 通用触摸桥：面板尺寸自读 cfg.json（1020×240）
+cfg_overlay = "patches/cfg.json.overrides"     # direction=0 + bpp=32（tp 原值就是 axs_ts）
+battery     = true                             # 伪造健康电量（VM 没有 RK816）
+license     = true                             # 开机写开发凭证
+ap          = true                             # wlan1 虚拟热点
+hooks       = ["patches/vm-keys.sh"]           # 实体键三件套（model bind + uinput helper）
+extra       = ["patches/vm-keys.pl", "patches/vm-keys-apply", "patches/vm-keys.env", "patches/S50vm-keys"]
+
+[adapt.replace]                                # 覆盖 guest 文件
+"patches/runDictPen.sh" = "/usr/bin/runDictPen"   # 去 crash-reboot + 钉皮肤 theme-y09p
+# fourcc AR24/RG16 → XR24（bochs 只有 XR24；a7p 首启实测 `Cannot find plane` 黑屏后补）。
+# 32 位 ARM 模式 movw/movt，三处：0x221edc（plane 搜索）、0x2249d4+0x2249dc/e0（AddFB2，
+# RG16 那对连 movt 高半字 0x3631→0x3432）。另：格式匹配循环的回跳 bne@0x2249cc 改 NOP
+# （循环的比较值 r7 来源不明、补完常量仍不匹配；NOP 后首轮强制通过，AddFB2 侧走正经
+# XR24 常量——判定实验转正，正解待挖，详见包 README）。
+"patches/libfalcon.so" = "/usr/lib/libfalcon.so"
+# license 恒真：4.13.2 首启即验签失败（`initSecondaryStartupSignal license verify
+# failed`），应用直接进「验证引导」页。yd_hal_verify_license @0x95f0（ARM 模式）
+# 补成 mov r0,#1; bx lr（vm/patch_sym.py 生成；a7pro 4.13.0 用的是单指令改写，偏移不同）。
+"patches/libydhal_devices.so" = "/usr/lib/libydhal_devices.so"
+# ⚠ 首次起机后按 a7pro 的流程从客机提取再生成（固件 4.13.0→4.13.2 偏移可能变了，
+# 不能直接复用 a7pro 的补丁库）：
+#   libfalcon.so       —— fourcc AR24/RG16 → XR24（bochs 只有 XR24，不补可能黑屏）
+#   libydhal_devices.so —— yd_hal_verify_license 恒真（否则约 5 分钟后重校验跳「验证引导」）
+
+[checks]
+"images/a7p-rootfs.img" = { md5 = "970e5d9e985a7f49e8e82b35a8e21c37" }
+"images/a7p-boot.img"   = { md5 = "50999a85646aaaa2bd808c71e50f3927" }
+
+[state]
+# a7pro 实测 /userdata 约 190 MiB + vendor 冗余约 340 MiB；本机同代，给 1 GiB 同款。
+size_mb = 1024

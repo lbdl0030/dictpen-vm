@@ -131,13 +131,21 @@ def how_deb_arm64(item):
 def how_ssh_key(item):
     key = under(item["check"])
     os.makedirs(os.path.dirname(key), exist_ok=True)
-    run(["ssh-keygen", "-t", "ed25519", "-f", key, "-N", "", "-C", "dictpen-vm"])
+    # 两把身份：ed25519 给带新 dropbear 的包，ecdsa 给没编 ed25519 的老固件
+    keys = [(key, "ed25519", "dictpen-vm"),
+            (key + "_ecdsa", "ecdsa", "dictpen-devvm-ecdsa")]
+    for path, kind, comment in keys:
+        if not os.path.exists(path):
+            run(["ssh-keygen", "-t", kind, "-f", path, "-N", "", "-C", comment])
     user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
     if os.name == "nt" and user:
-        # Windows OpenSSH 拒绝权限过宽的私钥，必须收紧
-        subprocess.run(["icacls", key, "/inheritance:r",
-                        "/grant:r", f"{user}:R"], capture_output=True, text=True)
-        print(f"    已收紧权限: {rel(key)}")
+        # Windows OpenSSH 拒绝权限过宽的私钥，必须收紧（缺一把就整条 SSH 挂掉）
+        for path, _, _ in keys:
+            if not os.path.exists(path):
+                continue
+            subprocess.run(["icacls", path, "/inheritance:r",
+                            "/grant:r", f"{user}:R"], capture_output=True, text=True)
+            print(f"    已收紧权限: {rel(path)}")
 
 
 def _openssl():

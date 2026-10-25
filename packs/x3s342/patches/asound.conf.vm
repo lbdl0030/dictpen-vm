@@ -1,0 +1,232 @@
+# dictpen-vm / x3s342 的声音配置。
+# 底本：固件自带的 /etc/asound.conf.VCherry_3566，按 VM 的硬件改三类：
+#   1. `type hooks` 那几段要写混音器控件 "Playback Path"（Rockchip 功放的路径开关）。
+#      QEMU usb-audio 没这个控件，snd_pcm_open 直接返回 ENOENT，
+#      应用侧表现为 openOutputDevice 失败、PCM 一直是 closed。
+#      这里把 hooks 层拆掉，pcm 名字和上下游路由都保留。
+#   2. 底本里的 hw:1,0（数字耳机那张卡）、hw:0,1（采集）、hw:7,1,0 在 VM 里不存在，
+#      输出统一落到 hw:0,0，采集落到 pcm.vm_mic。
+#   3. ladspa 插件目录 /usr/lib/ladspa 在固件里没有，eq_drc_stereo 那条链走不通，
+#      pcm.speaker 按底本注释里那条「no use ladspa」的路径接 spk_softvol。
+# 假采集：pcm.vm_mic 是 ALSA null，能打开、只出静音，录音链路不再无限重试。
+
+defaults.pcm.rate_converter "speexrate_medium"
+
+pcm.!default
+{
+    type asym
+    playback.pcm "speaker"
+    capture.pcm "vm_mic"
+}
+
+pcm.soft_resample_spk {
+    type rate
+    slave {
+        pcm "hw:0,0"
+        rate 48000
+    }
+    converter "speexrate"
+}
+
+# 扬声器
+pcm.speaker {
+    type plug
+    slave.pcm "hook_speaker_ctrl"
+}
+
+pcm.spk_mono2stereo {
+    type route
+    slave {
+        pcm "speaker"
+        channels 2
+    }
+    ttable {
+        0.0 1
+        0.1 1
+    }
+}
+
+pcm.spk_softvol {
+    type softvol
+    slave.pcm "rk_eqdrc_dmixer"
+    control {
+        name "Master Playback Volume"
+        card 0
+        device 0
+    }
+    min_dB -50.00
+    max_dB -1.55
+    resolution 256
+}
+
+pcm.hook_speaker_ctrl {
+    type plug
+    slave.pcm "spk_softvol"
+}
+
+pcm.rk_eqdrc {
+    type plug
+    slave.pcm "rk_eqdrc_hook_speaker_ctrl"
+}
+
+pcm.rk_eqdrc_ladspa {
+    type plug
+    slave.pcm "rk_eqdrc_hook_speaker_ctrl"
+}
+
+pcm.rk_eqdrc_hook_speaker_ctrl {
+    type plug
+    slave.pcm "rk_eqdrc_dmixer"
+}
+
+pcm.rk_eqdrc_dmixer {
+    type dmix
+    ipc_key 5978290
+    ipc_key_add_uid true
+    slave {
+        pcm "hw:0,0"
+        channels 2
+        rate 48000
+        period_size 960
+        buffer_size 3840
+    }
+    bindings {
+        0 0
+        1 1
+    }
+}
+
+# 数字耳机（VM 里与扬声器同一张卡）
+pcm.dhs_mono2stereo {
+    type route
+    slave {
+        pcm "hw:0,0"
+        channels 2
+    }
+    ttable {
+        0.0 1
+        0.1 1
+    }
+}
+
+pcm.dhs_other2stereo {
+    type route
+    slave {
+        pcm "hw:0,0"
+        channels 2
+    }
+    ttable {
+        0.0 1
+        1.1 1
+    }
+}
+
+pcm.dhs_hwplug {
+    type plug
+    slave.pcm "plughw:0,0"
+}
+
+pcm.tc_digital {
+    type plug
+    slave.pcm "plughw:0,0"
+}
+
+# 模拟耳机（VM 里没耳机插孔，这条路只是保证被打开时不会 abort）
+pcm.tc_analog {
+    type plug
+    slave.pcm "tca_softvol"
+}
+
+pcm.tca_mono2stereo {
+    type route
+    slave {
+        pcm "tc_analog"
+        channels 2
+    }
+    ttable {
+        0.0 1
+        0.1 1
+    }
+}
+
+pcm.tca_other2stereo {
+    type route
+    slave {
+        pcm "tc_analog"
+        channels 2
+    }
+    ttable {
+        0.0 1
+        1.1 1
+    }
+}
+
+pcm.tca_softvol {
+    type softvol
+    slave.pcm "plughw:0,0"
+    control {
+        name "Master APlayback Volume"
+        card 0
+        device 0
+    }
+    min_dB -50.00
+    max_dB -1.55
+    resolution 256
+}
+
+pcm.hook_tca_ctrl {
+    type plug
+    slave.pcm "tca_softvol"
+}
+
+# 采集
+pcm.softvol_cap {
+    type softvol
+    slave.pcm "vm_mic"
+}
+
+pcm.fake_record {
+    type plug
+    slave.pcm "vm_mic"
+}
+
+pcm.fake_play {
+    type plug
+    slave.pcm "plug:rk_eqdrc_dmixer"
+}
+
+pcm.fake_jack2 {
+    type plug
+    slave.pcm "ana_phone"
+}
+
+pcm.hooks_ana_phone {
+    type plug
+    slave.pcm "hw:0,0"
+}
+
+pcm.softvol_ana_phone {
+    type softvol
+    slave.pcm "hooks_ana_phone"
+    control {
+        name "MasterAHP Volume"
+        card 0
+        device 0
+    }
+    min_dB -50.0
+    max_dB 0.0
+    resolution 100
+}
+
+pcm.ana_phone
+{
+    type plug
+    slave {
+        pcm "softvol_ana_phone"
+        rate 48000
+    }
+}
+
+pcm.vm_mic {
+    type null
+}

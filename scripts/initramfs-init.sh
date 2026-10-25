@@ -753,12 +753,21 @@ fi
 if [ -d "$TARGET/root" ]; then
     mkdir -p $TARGET/root/.ssh && chmod 700 $TARGET/root/.ssh
     if [ ! -f $TARGET/root/.ssh/dropbear_rsa_host_key ]; then
+        # dropbearkey 要 /dev/urandom；此刻 /dev 还没 move 进新根，
+        # 不 bind 的话 chroot 里必失败（x3s 上就是这样，SSH 一直没起来）
+        mkdir -p $TARGET/dev
+        mount --bind /dev $TARGET/dev 2>/dev/null
         chroot $TARGET /usr/bin/dropbearkey -t rsa -s 2048 \
             -f /root/.ssh/dropbear_rsa_host_key >/dev/null 2>&1 \
             && echo "dropbear host key generated in /root/.ssh"
+        umount $TARGET/dev 2>/dev/null
     fi
-    grep -q dictpen-devvm $TARGET/root/.ssh/authorized_keys 2>/dev/null || \
+    # 两把钥匙：ed25519 是主力；ECDSA 给 dropbear 没编 ECC-ed25519 的固件
+    # （x3s 的 buildroot dropbear 只认 ssh-rsa / ecdsa-sha2-*）
+    grep -q ' dictpen-devvm$' $TARGET/root/.ssh/authorized_keys 2>/dev/null || \
         echo '__DICTPEN_PUBKEY__' >> $TARGET/root/.ssh/authorized_keys
+    grep -q 'dictpen-devvm-ecdsa' $TARGET/root/.ssh/authorized_keys 2>/dev/null || \
+        echo '__DICTPEN_PUBKEY_ECDSA__' >> $TARGET/root/.ssh/authorized_keys
     chmod 600 $TARGET/root/.ssh/authorized_keys
     grep -q dropbear $TARGET/etc/inittab 2>/dev/null || \
         sed -i 's|^::sysinit:/etc/init.d/rcS|::sysinit:/usr/sbin/dropbear -p 22 -r /root/.ssh/dropbear_rsa_host_key\n::sysinit:/etc/init.d/rcS|' $TARGET/etc/inittab

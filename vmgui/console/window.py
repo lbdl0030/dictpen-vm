@@ -2442,6 +2442,16 @@ class ConsoleWindow(QMainWindow):
             return
         pw, ph = harness.panel(self.pack)
         cur = self.cfg.get("display.crop") or {}
+        # 画面不一定属于"现在选中的那台"：换目标之后旧帧还在，或者正在关机。
+        # 拿选中的面板（比如 a7p 的 1020×266）去裁另一台（p5 的 960×480），
+        # 就会把整幅图截掉下半截 —— 2026-10-25 实测到的"切到 p5 画面被裁"。
+        running = harness.current_pack()
+        if running and self.pack and running != self.pack:
+            if cur.get("enabled"):
+                self.cfg.set("display.crop", {"enabled": False, "x": 0, "y": 0, "w": 0, "h": 0})
+                self.canvas.set_config(self.cfg)
+                self.canvas.updateGeometry()
+            return
         new = harness.crop_for(pw, ph, gw, gh)
         if (cur.get("enabled"), cur.get("w"), cur.get("h")) == \
                 (new["enabled"], new["w"], new["h"]):
