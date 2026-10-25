@@ -2,14 +2,14 @@
 
 在 Windows 上用 QEMU 运行**词典笔真实固件**的虚拟机（不需要管理员权限，也不需要 WSL）。
 框架本身不含固件：一台机器会变的东西全在 `packs/<名字>/` 里，启动时用 `--pack` 选一台。
-仓库自带八个包：**a6pro / a7pro / s6pro / s7pro / x5pro / x6pro / x7 / x3s342**。
+仓库自带十个包：**a6pro / a7p / a7pro / p5 / s6pro / s7pro / x3s342 / x5pro / x6pro / x7**。
 
 ## 最快上手
 
 **第一次用，先下载**（之后每次只要第 4 步）。`bootstrap.py` 下的是 QEMU、通用内核与
 initramfs 工具链，以及**五台有上游镜像的固件**（a6pro / a7pro / s6pro / s7pro / x5pro）。
 固件按包分开、都标 optional，`python scripts\bootstrap.py --only firmware-x5pro` 只取一台；
-**x6pro、x7 与 x3s342 上游没有现成镜像**：x6pro / x7 要从各自的 OTA 包提取（步骤见
+**x6pro、x7、x3s342、a7p、p5 上游没有现成镜像**：x6pro / x7 / a7p / p5 要从各自的 OTA 包提取（步骤见
 [docs/发布说明.md](docs/发布说明.md) §3）；x3s342 的 `system_a` 是增量载荷，还要按
 [packs/x3s342/README.md](packs/x3s342/README.md) 把它合到 2.8.65 基线 rootfs 上。
 
@@ -139,8 +139,9 @@ python scripts\dpctl.py up
 - 若状态盘不可用，自动回落到原来的 tmpfs 行为，VM 仍能正常开机。
 
 > **扩容只改 VM 状态盘**：控制台「配置」页把它扩到更大后，客机 `df` 会变；x6pro、x7、
-> a6pro、x5pro、s6pro、s7pro 的设置页已由 preload shim 改成读 VM 状态盘（扩容后会跟着变，
-> 两条入口「空间清理」「关于→存储容量」都跟随），其他机型逐步适配。
+> a6pro、x5pro、s6pro、s7pro、p5、x3s342 的设置页已由 preload shim 改成读 VM 状态盘（扩容后
+> 会跟着变，两条入口「空间清理」「关于→存储容量」都跟随）。a7p 用户态是 uClibc，现有 glibc
+> shim 装不进去，这一台仍显示固件固定容量。
 > 实际数字看「配置」页的宿主/客机两格。
 
 `dpctl up --fresh` 可删掉当前包的盘重来（下次开机重新格式化）。
@@ -524,6 +525,8 @@ https://fanyidan.youdao.com/fanyidanapi/activation/v2/verify
 | **X7pro** | YDPX7 | RV1106, Linux（aarch64+glibc） | `x7-system_a.img`（无 boot，面板参数取自镜像内 cfg.json） | ✅ `rv1106-linux-erofs`（fourcc/logo 补丁，见 packs/x7pro/README.md） |
 | X5pro | — | RK3566, Android 系 | `X5pro`: x5-1-pro-ro-rootfs_b.img + boot_b | ⛔ 需要新的 runtime |
 | X3s | Cherry-3566 | RK3566 | `X3s-OTA-OS3.4.2`（增量合到 2.8.65 基线，见 packs/x3s342/README.md） | ✅ `rockchip-linux-ext4`（packs/x3s342，miniapp 桌面；OS 2.8.65 旧 Qt 线已归档停做） |
+| A7P | Y09P | RV1106, Linux | `Y09P_RV1106-OTA-OS99.99.91`（需切分，见 packs/a7p/README.md） | ✅ `rv1106-linux-erofs`（packs/a7p） |
+| P5 | Almond | RK3566, Linux | `Almond-OTA-OS99.99.91`（需切分，见 packs/p5/README.md） | ✅ `rockchip-linux-ext4`（packs/p5，P 系首台） |
 | X6plus | Cherry-3566 | RK3566 | `Cherry-3566-OTA-*`（需解包 OTA） | 🔶 同板族未建包（未实测） |
 | X7（RK3562 代） | RK3562_Orange | RK3562 | `X7` 等 | ⛔ 需要新的 runtime（注意：`x7-system_a.img` 实为 RV1106 族，已按上行支持） |
 | S6pro / S7pro | PineApple / Y08_CV1813 | Cvitek CV1826 | `S6pro` / `S7pro` | ⛔ 需要新的 runtime |
