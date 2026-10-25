@@ -2858,6 +2858,44 @@ class TestX7StorageShim(unittest.TestCase):
         self.assertIn("patches/libvmstorage.so", toml)
 
 
+class TestIdlePolling(unittest.TestCase):
+    """静态画面降频：连续两帧不变才放慢；输入必须立刻回到正常节奏。"""
+
+    class _Bus:
+        def emit(self, *a, **k):
+            pass
+
+    def _backend(self, poll=30, idle=150):
+        from vmgui.backends import qmp as QMP
+        cfg = Config.load(cli_overrides={"display": {"frame_poll_ms": poll,
+                                                    "idle_poll_ms": idle}},
+                          profiles=[], user_path=os.devnull)
+        return QMP.QmpBackend(cfg, self._Bus())
+
+    def test_pace_backs_off_only_after_two_still_frames(self):
+        b = self._backend()
+        self.assertAlmostEqual(b._pace(True), 0.03)
+        self.assertAlmostEqual(b._pace(False), 0.03, msg="首帧不变还按正常节奏再看一眼")
+        self.assertAlmostEqual(b._pace(False), 0.15, msg="连续两帧不变才放慢")
+        self.assertAlmostEqual(b._pace(True), 0.03, msg="画面一变立刻回正常节奏")
+        self.assertAlmostEqual(b._pace(False), 0.03)
+
+    def test_idle_never_faster_than_normal(self):
+        b = self._backend(poll=200, idle=30)
+        self.assertAlmostEqual(b._idle_poll_s, 0.2, msg="静止节奏不能比正常节奏还快")
+
+    def test_input_forces_a_frame_only_when_idle(self):
+        b = self._backend()
+        b._pace(False)
+        b._pace(False)                       # 进入静止节奏
+        b.pointer(10, 20, 0, True)
+        self.assertTrue(b._force, "静止时一有输入就该立刻抓一帧，别等 150 ms")
+        b._force = False
+        b._pace(True)                        # 画面在动，回到正常节奏
+        b.key(30, True)
+        self.assertFalse(b._force, "动画中再强制抓帧等于把 dump 叠到输入路径上")
+
+
 class TestDisplaySwapRB(unittest.TestCase):
     """a6/a7 的 falcon 输出 R/B 与扫描线相反，由宿主呈现层纠正。"""
 
@@ -2964,6 +3002,71 @@ class TestPackAudioCards(unittest.TestCase):
         for v in (0, -3):
             p = packlib.Pack("t", {"audio": {"cards": v}}, "/tmp")
             self.assertEqual(p.audio_cards, 1)
+
+
+class TestSnapshotExtraDrives(unittest.TestCase):
+    """额外可写镜像在存/恢复快照时必须挂只读，否则 savevm 直接失败（x3s342 实测）。"""
+
+    def test_readonly_only_in_snapshot_modes(self):
+        from scripts import runtimes
+        rt = runtimes.get("rv1106-linux-erofs")
+
+        class P:
+            name = "t"
+            rootfs = "root.img"
+            extra_images = ["/tmp/u.img"]
+
+        cls = type(rt)
+        had = "_extra_copy" in cls.__dict__
+        orig = cls.__dict__.get("_extra_copy")
+        cls._extra_copy = staticmethod(lambda pack, path: "extra.img")   # noqa: ARG005
+        saved = {k: os.environ.pop(k, None)
+                 for k in ("DICTPEN_SNAPSHOT", "DICTPEN_LOADVM")}
+        try:
+            normal = " ".join(rt.drive_args(P, "state.img"))
+            os.environ["DICTPEN_SNAPSHOT"] = "1"
+            snap = " ".join(rt.drive_args(P, "state.img"))
+            os.environ.pop("DICTPEN_SNAPSHOT")
+            os.environ["DICTPEN_LOADVM"] = "ready"
+            resume = " ".join(rt.drive_args(P, "state.img"))
+        finally:
+            if had:
+                cls._extra_copy = orig
+            else:
+                del cls._extra_copy
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        def extra(line):
+            return [a for a in line.split() if a.startswith("file=extra.img")][0]
+
+        base = "file=extra.img,if=virtio,format=raw,cache=writeback"
+        self.assertEqual(extra(normal), base, "普通启动仍让固件写这张盘")
+        self.assertEqual(extra(snap), base + ",readonly=on")
+        self.assertEqual(extra(resume), base + ",readonly=on")
+
+
+class TestSharedPayload(unittest.TestCase):
+    """p5 / x3s342 的 weston 载荷共用 `packs/_shared/`，别又抄成两份。"""
+
+    def test_both_packs_stage_the_same_shared_files(self):
+        import os
+        from scripts import packlib
+        seen = {}
+        for name in ("p5", "x3s342"):
+            pack = packlib.load_pack(name)
+            staged = {os.path.basename(dst): src
+                      for dst, src, _mode in pack.patch_sources()
+                      if os.path.basename(dst) in ("weston.tar", "weston9.tar")}
+            self.assertEqual(set(staged), {"weston.tar", "weston9.tar"}, name)
+            for src in staged.values():
+                self.assertTrue(os.path.isfile(src), src)
+            seen[name] = staged
+        self.assertEqual(seen["p5"], seen["x3s342"], "两包应指向同一份共享载荷")
+        self.assertEqual(packlib._shared_tops(packlib.load_pack("p5")), ["_shared"])
 
 
 if __name__ == "__main__":

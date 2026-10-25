@@ -7,11 +7,12 @@
 ## 最快上手
 
 **第一次用，先下载**（之后每次只要第 4 步）。`bootstrap.py` 下的是 QEMU、通用内核与
-initramfs 工具链，以及**五台有上游镜像的固件**（a6pro / a7pro / s6pro / s7pro / x5pro）。
-固件按包分开、都标 optional，`python scripts\bootstrap.py --only firmware-x5pro` 只取一台；
-**x6pro、x7、x3s342、a7p、p5 上游没有现成镜像**：x6pro / x7 / a7p / p5 要从各自的 OTA 包提取（步骤见
-[docs/发布说明.md](docs/发布说明.md) §3）；x3s342 的 `system_a` 是增量载荷，还要按
-[packs/x3s342/README.md](packs/x3s342/README.md) 把它合到 2.8.65 基线 rootfs 上。
+initramfs 工具链，以及固件镜像：a6pro / a7pro / s6pro / s7pro / x5pro 取上游资产；
+**a7p / p5 / x3s342 的已切好镜像也在 release 里**，直接下载并核对 MD5（支持断点续传；
+大文件按 Range 多线程下，默认 32 线，可用 `DICTPEN_DL_THREADS` 调低）。
+固件按包分开、都标 optional，`python scripts\bootstrap.py --only firmware-x5pro` 只取一台。
+**x6pro、x7 仍要手工提取**：没有现成整镜像（x6pro/x7 从各自 OTA 包提取，步骤见
+[docs/发布说明.md](docs/发布说明.md) §3）；`--check` 会把缺的文件与出处一起打印出来。
 
 ```bat
 :: 1) 拿到仓库：clone，或从 GitHub Releases 下载 dictpen-vm-<版本>.zip 解压
@@ -256,7 +257,9 @@ python scripts\dpctl.py sh -c "cat /sys/class/power_supply/battery/capacity"
 ### CPU 加速（无法使用 WHPX）
 - 本机 Windows 的 **WHPX 不支持 ARM64 客户机**（QEMU 的 WHPX 仅支持 x86 客户机），
   因此 **无法使用硬件加速**，只能用 QEMU 的 **TCG 纯软件模拟**。
-- 已启用多线程 TCG 并加大资源：`-accel tcg,thread=multi -smp 4 -m 2G`。
+- 已启用多线程 TCG：`-accel tcg,thread=multi`；内存默认 2 G，vCPU 按运行框架给
+  （RK356x / CV18xx 保持 4，RV1106 单核默认 2 —— 多给的核空闲时也在 TCG 里空转，
+  实测 4→2 页面响应不变、宿主空闲 CPU 少约 7%）。单台可用 `vm/machine.toml` 覆盖。
 - 速度较慢属正常现象（32 位 ARM 用户态跑在 aarch64 内核的 COMPAT 层上）。
 
 ## 目录结构
@@ -265,6 +268,7 @@ python scripts\dpctl.py sh -c "cat /sys/class/power_supply/battery/capacity"
 |------|------|
 | `scripts/dpctl.py` | **开发/调试入口**：选包启动、传文件、实机命令行、adb（见上节） |
 | `packs/<名>/` | **固件包**：一台机器的全部会变的东西（`pack.toml` + `images/` + `patches/` + `README.md`），见"固件包与镜像选择" |
+| `packs/_shared/` | 多个包共用的同一份载荷（目前是 p5 / x3s342 的 `weston.tar`、`weston9.tar`）。不是固件包（没有 `pack.toml`）；包用 `../_shared/…` 引用，`dpctl pack export` 会把它随包一起导出 |
 | `scripts/packlib.py` | 包解析/校验/导入导出，以及"包 → initrd"的合并（框架通用 cpio + 包 patches + `pack.env` + EDID） |
 | `scripts/runtimes/` | 框架内置的**多种运行框架**（boot backend）：`rv1106_linux.py` 是第一个；包里的 `[platform].runtime` 选一个 |
 | `deps/manifest.toml` | **依赖清单**：缺什么、去哪拿、怎么校验；`scripts/bootstrap.py` 按它重建环境 |

@@ -27,6 +27,7 @@ BACKEND_KEYS = {
     "connection.reconnect.enabled", "connection.reconnect.backoff_ms",
     "connection.reconnect.max_backoff_ms",
     "display.frame_poll_ms",
+    "display.idle_poll_ms",
     "input.touch_button", "input.send_click_with_touch",
 }
 
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow):
         self._fps = 0.0
         self._guest_size = (0, 0)
         self._geometry_restored = False
+        self._auto_paused = False             # 最小化时自动停取帧（窗口恢复后解开）
         self._settings = QSettings("vmgui", "vmgui")
 
         self.canvas = Canvas(cfg)
@@ -397,6 +399,15 @@ class MainWindow(QMainWindow):
             if self.grab.active:
                 self.grab.release()
                 self.act_grab.setChecked(False)
+        # 最小化时不再取帧：每帧要让 QEMU 写 ~800 KB 的 PPM，窗口看不见就白花。
+        if e.type() == QEvent.WindowStateChange:
+            minimized = self.isMinimized()
+            if minimized and not self._auto_paused:
+                self._auto_paused = True
+                self.session.set_paused(True)
+            elif not minimized and self._auto_paused:
+                self._auto_paused = False
+                self.session.set_paused(False)
         return super().event(e)
 
     def _toggle_fullscreen(self) -> None:

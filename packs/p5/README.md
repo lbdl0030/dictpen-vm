@@ -49,6 +49,9 @@ aarch64 glibc。面板同为 480×960 竖屏 DSI（横用 960×480），cfg.json
      weston 10 把 wl_shell 编译掉了，应用建窗后 SIGSEGV（exit 139）——**必须
      Weston 9**（x3s342 同病同修）。现用双载荷：weston.tar（bookworm 运行库+loader）
      + weston9.tar（weston 9 本体），S50vm-ui 按 x3s342 方式启动。
+     这两份载荷与 x3s342 逐字节相同，实际只存一份在 `packs/_shared/`（包里的
+     `[adapt].extra` 用 `../_shared/weston.tar` / `../_shared/weston9.tar` 引用），
+     发布包因此少带 70 MB；`dpctl pack export` 会把 `_shared` 一起写进 `.dpm`。
 2. **wayland 窗口已建立**：`WLNativeWindow::setSurfaceSize(960,480)` →
    `setSize(960,266)` → `setPosition(0,107)`，与 cfg.json 逻辑屏完全一致；
    kiosk 灰底常驻（截图 `vm/shots/_p5_boot7.png`）。

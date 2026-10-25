@@ -1,10 +1,13 @@
 # x3s342 —— YDPX3s / RK3566 / OS 3.4.2（miniapp 桌面）
 
-同板子的另一代固件。OS 2.8.65（旧版 native Qt 桌面）那套包已移到
-`../vm-archive/x3s-2865`（仓库同级的 `vm-archive/`），不在本仓库里。本包是 3.4.2，
-桌面由 miniapp（libfalcon + QuickJS）提供，和 x6pro / x7 / s7pro 同一条产品线。
+同板子的另一代固件。OS 2.8.65（旧版 native Qt 桌面）那套包曾移到仓库同级的
+`../vm-archive/x3s-2865`，**2026-10-25 按人要求删除**（与 `D:/download/ota` 一起清理，
+D 盘腾空间）。本包是 3.4.2，桌面由 miniapp（libfalcon + QuickJS）提供，
+和 x6pro / x7 / s7pro 同一条产品线。
 判定依据：`/usr/bin/runDictPen` 最后执行 `/usr/bin/miniapp`（旧 Qt 那行是注释），
 增量的 delete 清单删掉了 737 个旧 Qt 应用文件。
+⚠ 本包的 `images/x3s342-merged.img` 仍在，起机不受影响；但要**重新合并** 3.4.2
+就得自己重新获取 2.8.65 的完整 rootfs 当基线（见下节），旧包和 OTA 源包都已不在本机。
 
 ## 来源与切分
 

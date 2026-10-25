@@ -189,6 +189,11 @@ class QmpBackend:
         self._uri = cfg.get("connection.uri", "tcp:127.0.0.1:4446")
         self._timeout_ms = int(cfg.get("connection.timeout_ms", 3000))
         self._poll_s = max(0.005, int(cfg.get("display.frame_poll_ms", 30)) / 1000.0)
+        # 画面不变时放慢取帧（静态页面下 screendump 仍要 ~15 ms 且写 800 KB）。
+        # 一旦有输入或画面变化立刻回到 frame_poll_ms。
+        self._idle_poll_s = max(self._poll_s,
+                                int(cfg.get("display.idle_poll_ms", 150)) / 1000.0)
+        self._still = 0
         self._touch_button = int(cfg.get("input.touch_button", 330))
         self._click_with_touch = bool(cfg.get("input.send_click_with_touch", True))
         self._backoff_ms = int(cfg.get("connection.reconnect.backoff_ms", 500))
@@ -253,11 +258,15 @@ class QmpBackend:
         """absolute=True 时 x,y 为 guest 像素；否则为相对增量。"""
         with self._lock:
             self._queue.append(("pointer", (int(x), int(y), int(buttons), bool(absolute))))
+        if self._still >= 2:          # 静止时立刻补一帧；动画中不必额外抓
+            self._force = True
         self._wake.set()
 
     def key(self, code: int, down: bool, mods: int = 0) -> None:
         with self._lock:
             self._queue.append(("key", (int(code), bool(down), int(mods))))
+        if self._still >= 2:
+            self._force = True
         self._wake.set()
 
     def screenshot(self, dest: str, fmt: str = "png") -> None:
@@ -310,8 +319,12 @@ class QmpBackend:
                 self._force = False
                 # `39` §2 #7：暂停时不按节奏取帧，但**仍然认 force**（继续/存图要用）。
                 if force or (now >= next_frame and not self._paused):
-                    self._grab_frame()
-                    next_frame = time.monotonic() + self._poll_s
+                    # 节奏从**抓帧开始**算，不是抓完再等一个 poll：screendump 本身要
+                    # ~15 ms（813 KB），从结束后再等 30 ms 等于 45 ms 一帧（22 fps），
+                    # 应用画得再快也被这一层压住。
+                    t_grab = time.monotonic()
+                    changed = self._grab_frame()
+                    next_frame = t_grab + self._pace(changed)
             except (QmpError, OSError) as e:
                 self._fails += 1
                 # 过阈值之后分母不再有意义（旧写法会一路打 `4/3 … 11/3`，千问 Q48 顺带报的）：
@@ -347,7 +360,15 @@ class QmpBackend:
             self._state = state
             self.bus.emit(ev.STATE, state, detail)
 
-    def _grab_frame(self) -> None:
+    def _pace(self, changed: bool) -> float:
+        """下一帧的等待：画面变了回到正常节奏，连续两帧没变就放慢。"""
+        if changed:
+            self._still = 0
+            return self._poll_s
+        self._still += 1
+        return self._idle_poll_s if self._still >= 2 else self._poll_s
+
+    def _grab_frame(self) -> bool:
         try:
             if os.path.exists(self._dump):
                 os.remove(self._dump)
@@ -360,6 +381,9 @@ class QmpBackend:
         frame = Frame(pixels=rgb, width=w, height=h, stride=stride,
                       fmt="bgr888" if self.swap_rb else "rgb888")
         with self._lock:
+            changed = (self._last_frame is None
+                       or self._last_frame.pixels != rgb
+                       or (self._last_frame.width, self._last_frame.height) != (w, h))
             self._last_frame = frame
             new_size = (w, h) != self._size
             self._size = (w, h)
@@ -367,6 +391,7 @@ class QmpBackend:
             log.info("guest 分辨率 %dx%d", w, h)
             self.bus.emit(ev.RESOLUTION, w, h)
         self.bus.emit(ev.FRAME, frame)
+        return changed
 
     # ---- 存图 ---------------------------------------------------------- #
     def _drain_shots(self) -> None:

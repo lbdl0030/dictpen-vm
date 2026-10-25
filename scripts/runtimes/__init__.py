@@ -101,9 +101,16 @@ class Runtime:
             "-drive", f"file={state_img},if=virtio,format={state_fmt},cache=writeback",
         ]
         # 包声明的额外镜像：/dev/vdc、vdd…（顺序即声明顺序）
+        # 存快照 / 从快照恢复时把它们挂成只读：QEMU 不允许"可写但不支持快照"的
+        # 块设备参与 savevm（x3s342 的 uresource 实测报 `Device 'virtio2' is
+        # writable but does not support snapshots`）。这台固件本来就 `-o ro` 挂它。
+        extra_ro = bool(os.environ.get("DICTPEN_SNAPSHOT")
+                        or os.environ.get("DICTPEN_LOADVM"))
         for path in getattr(pack, "extra_images", []) or []:
+            ro = ",readonly=on" if extra_ro else ""
             args += ["-drive",
-                     f"file={cls._extra_copy(pack, path)},if=virtio,format=raw,cache=writeback"]
+                     f"file={cls._extra_copy(pack, path)},if=virtio,format=raw"
+                     f",cache=writeback{ro}"]
         return args
 
 

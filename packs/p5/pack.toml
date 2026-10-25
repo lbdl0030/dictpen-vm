@@ -50,7 +50,8 @@ ap          = true                          # wlan1 虚拟热点
 # 桥后把 vm-touch 软链到 cfg 的 tp 路径 axs_ts。
 cfg_overlay = "patches/cfg.json.overrides"  # tp 指 axs_ts（桥的落点），方向/偏移归零
 hooks       = ["patches/prepare.sh"]
-extra       = ["weston.tar", "patches/weston9.tar", "patches/S45vm-wifi", "patches/S50vm-ui",
+extra       = ["../_shared/weston.tar", "../_shared/weston9.tar",
+               "patches/S45vm-wifi", "patches/S50vm-ui",
                "patches/touchbridge.bin", "patches/touchbridge.c", "patches/99-axs-ts.rules",
                "patches/libvmstorage.so"]
 

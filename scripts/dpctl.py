@@ -866,6 +866,7 @@ def save_fast_snapshot(pack_name, force=False):
     env["DICTPEN_STATE_IMG"] = fast
     env["DICTPEN_STATE_FMT"] = "qcow2"
     env["DICTPEN_AUDIO"] = "none"
+    env["DICTPEN_SNAPSHOT"] = "1"       # 额外可写镜像（如 x3s342 uresource）挂只读，savevm 才收
     env.pop("DICTPEN_LOADVM", None)
     log_path = os.path.join(VM, "fast-save.log")
     with open(log_path, "ab") as logf:
@@ -876,15 +877,22 @@ def save_fast_snapshot(pack_name, force=False):
     if r.returncode != 0:
         return 1, f"启动快照盘失败（见 {os.path.relpath(log_path, ROOT)}）"
 
-    subprocess.run([sys.executable, "-X", "utf8", os.path.abspath(__file__),
-                    "wait", "--timeout", "120"], cwd=ROOT, env=env,
-                   capture_output=True, timeout=150)
+    try:
+        subprocess.run([sys.executable, "-X", "utf8", os.path.abspath(__file__),
+                        "wait", "--timeout", "120"], cwd=ROOT, env=env,
+                       capture_output=True, timeout=150)
+    except subprocess.TimeoutExpired:
+        pass                                # 还在起：下面的轮询会接着等
     found = False
     end = time.time() + 120
     while time.time() < end:
-        q = subprocess.run([sys.executable, "-X", "utf8", os.path.abspath(__file__),
-                            "sh", "-c", "ps | grep '[m]iniapp'"], cwd=ROOT,
-                           env=env, capture_output=True, timeout=20)
+        try:
+            q = subprocess.run([sys.executable, "-X", "utf8", os.path.abspath(__file__),
+                                "sh", "-c", "ps | grep '[m]iniapp'"], cwd=ROOT,
+                               env=env, capture_output=True, timeout=20)
+        except subprocess.TimeoutExpired:
+            time.sleep(2)                   # 客机起机期 SSH 可能卡住一轮，别把整次保存带走
+            continue
         if q.returncode == 0:
             found = True
             break

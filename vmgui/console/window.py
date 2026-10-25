@@ -19,7 +19,7 @@ import time
 from collections import deque
 from typing import Optional
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFileDialog, QHBoxLayout,
                                QLabel, QLineEdit, QListWidget,
@@ -446,6 +446,8 @@ class ConsoleWindow(QMainWindow):
         self._refit_next_frame = False  # 换过设备：下一帧按新面板重新套窗口（见 `_on_frame`）
         self._started_at = time.time()
         self._paused = False                              # 「暂停画面」开关
+        self._auto_paused = False                         # 窗口最小化时自动停取帧
+        self._minimized = False                           # 最小化期间探针也停
         self._zoom = None                                 # None = 适合窗口（`39` §4.2 的缩放档位）
         self._frame_gaps = deque(maxlen=24)               # 取帧节奏（我们自己量的 ms）
         self._last_frame_t = 0.0
@@ -1708,7 +1710,7 @@ class ConsoleWindow(QMainWindow):
         后台线程读、在 UI 线程写同一份"上次的桥/持有者 pid" —— 那是数据竞争。
         宁可少采一轮，也不要两轮同时改状态。
         """
-        if self._probe_busy:
+        if self._probe_busy or self._minimized:
             return
         self._probe_busy = True
         threading.Thread(target=self._probe_worker, name="probe", daemon=True).start()
@@ -2337,6 +2339,35 @@ class ConsoleWindow(QMainWindow):
         gx, gy = escape_tap_point(cw, ch, self.pack or "")
         self._tap_guest(gx, gy)
         self._note(f"已点击左上角返回位置（面板坐标 {gx},{gy}）")
+
+    def changeEvent(self, event) -> None:
+        """最小化时停掉取帧，恢复时回到用户自己的暂停状态。
+
+        取帧每帧要 QEMU 写一份 ~800 KB 的 PPM；窗口不在前台时这份开销白花。
+        `session.set_paused` 与「暂停画面」共用同一条通道，所以用 `_auto_paused`
+        区分"我替你停的"和"你自己停的"，恢复时不要把人手动勾的暂停也解开。
+        """
+        if event.type() == QEvent.WindowStateChange:
+            minimized = self.isMinimized()
+            if minimized and not self._minimized:
+                self._minimized = True
+                # 探针每轮要扫一遍客机的 /proc/*/fd（实测 ~0.75 s 客机 CPU），5 s 一轮
+                # 就是常驻负载；窗口看不见时这些读数没人看，停掉，恢复时立刻补一轮。
+                self._probe_timer.stop()
+                if not self._paused:
+                    self._auto_paused = True
+                    self._gap_discard = True
+                    self.session.set_paused(True)
+            elif not minimized and self._minimized:
+                self._minimized = False
+                self._probe_timer.start(PROBE_INTERVAL_MS)
+                self._kick_probe()
+                if self._auto_paused:
+                    self._auto_paused = False
+                    self._gap_discard = True
+                    self.session.set_paused(self._paused)
+                    self._refresh_rate_label()
+        super().changeEvent(event)
 
     def _pause_toggled(self, on: bool) -> None:
         """「暂停画面」开关：暂停 = 不再按节奏取帧；继续 = 立刻补一帧（`39` §2 #7）。"""

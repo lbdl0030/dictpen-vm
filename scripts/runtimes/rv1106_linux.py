@@ -26,6 +26,11 @@ class Rv1106LinuxRuntime(Runtime):
     name = "rv1106-linux-erofs"
     note = "RV1106 族 Linux 固件：只读 erofs rootfs + 独立 boot 镜像（virt 机型）"
 
+    # RV1106 是真单核 A7。TCG 下多给的 vCPU 不会闲着：a7p 实测空闲时宿主
+    # 4 个 vCPU 37%、2 个 29%、1 个 24%，而 1 个会让页面响应从 ~160 ms 掉到 ~460 ms。
+    # 2 个是不损失交互、又少一份空转的折中（机器参数仍可由 vm/machine.toml 覆盖）。
+    default_smp = 2
+
     def kernel(self, pack):
         return pack.kernel or framework_kernel_default()
 

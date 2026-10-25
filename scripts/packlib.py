@@ -294,12 +294,38 @@ def dist_plan():
 # --------------------------------------------------------------------------- #
 # 导入 / 导出（单文件 .dpm = tar.gz）
 # --------------------------------------------------------------------------- #
+def _shared_tops(pack):
+    """包引用到、但不在包目录里的 `packs/` 共享素材（顶层目录名，如 `_shared`）。
+
+    `packs/_shared/` 不是包（没有 pack.toml，`pack_names()` 不会列它），用来放
+    多个包共用的同一份载荷；`.dpm` 导出必须把它一起带上，否则导入后文件缺失。
+    """
+    tops = set()
+    try:
+        sources = pack.patch_sources()
+    except OSError:                              # 缺文件不该拦住整包导出
+        return []
+    for _dst, src, _mode in sources:
+        try:
+            rel = os.path.relpath(src, PACKS_DIR)
+        except ValueError:                       # 不同盘符
+            continue
+        if rel.startswith("..") or os.path.isabs(rel):
+            continue
+        top = rel.split(os.sep)[0]
+        if top and top != pack.name:
+            tops.add(top)
+    return sorted(tops)
+
+
 def export_pack(name, out):
     pack = load_pack(name)
     out = out if os.path.isabs(out) else os.path.join(ROOT, out)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with tarfile.open(out, "w:gz") as tf:
         tf.add(pack.dir, arcname=pack.name)
+        for top in _shared_tops(pack):
+            tf.add(os.path.join(PACKS_DIR, top), arcname=top)
     return out
 
 
@@ -310,9 +336,10 @@ def import_pack(archive, force=False):
     os.makedirs(PACKS_DIR, exist_ok=True)
     with tarfile.open(archive, "r:*") as tf:
         tops = {m.name.split("/")[0] for m in tf.getmembers() if m.name.strip("/")}
-        if len(tops) != 1:
+        packs = tops - {"_shared"}               # 共享素材可以和包一起导出
+        if len(packs) != 1:
             raise PackError(f"{os.path.basename(archive)} 顶层不是单独一个包目录：{sorted(tops)}")
-        name = tops.pop()
+        name = packs.pop()
         dest = os.path.join(PACKS_DIR, name)
         if os.path.exists(dest) and not force:
             raise PackError(f"包 {name} 已存在（加 --force 覆盖）")

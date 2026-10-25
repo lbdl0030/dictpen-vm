@@ -83,12 +83,13 @@ optional = true
 # 不含固件，`dpctl packs` 看有哪些包、`dpctl up --pack <名字>` 启动。
 #
 # 每台机器一条，且**都是 optional** —— 只下载你要用的那几台，不必全下
-# （七包镜像合计约 12 GB）。`bootstrap.py` 会按 `files` 里的 upstream 名去 release 里
+# （十包镜像合计约 17 GB）。`bootstrap.py` 会按 `files` 里的 upstream 名去 release 里
 # 下载，落盘时**改名为 local（= vm 规范名，pack.toml 认的就是它）**。
 #
 # 上游资产名多数已与 vm 规范名一致；例外是 s7pro（上游带 `_b`，本框架要改名去掉）。
-# x6pro / x7 的镜像目前不在该 release 里（只有 OTA 单包或占位说明），需自行提取，
-# 见各自包内的说明；下面留了注释不用启用。
+# a6pro / a7pro / s6pro / s7pro / x5pro 走 `how = "firmware"`（下载后改名）；
+# a7p / p5 / x3s342 的**已切好镜像**放在 release 里，走 `how = "http"`（断点续传 + MD5）；
+# x6pro / x7 仍用 `how = "manual"`（只有 OTA/网盘，需自己提取）。
 
 [[item]]
 id = "firmware-a6pro"
@@ -170,9 +171,72 @@ files = [
   { upstream = "x5-1-pro-ro-boot_b.img", local = "x5-1-pro-ro-boot_b.img", md5 = "90786ebdfb327d41094fb252e506d575", size = 16777216 },
 ]
 
-# ---- 上游暂时没有镜像的包（需要时自己准备，放到对应目录即可）----
-# x6pro：packs/x6pro/images/{system_a.img, boot_a.img}   —— 从 X6pro 的 OTA 包提取，见包内 DEVLOG
-# x7   ：packs/x7/images/x7-system_a.img                 —— 上游该 release 目前只有说明文件
+# ---- 已切好并放到 Release 的包：直接下载（断点续传 + MD5）----
+[[item]]
+id = "firmware-a7p"
+what = "a7p 的镜像：rootfs + boot（A7P / YDPA7-2 / Y09P / RV1106 / OS 4.13.2）"
+check = "packs/a7p/images/a7p-rootfs.img"
+how = "http"
+into = "packs/a7p/images"
+also = ["packs/a7p/images/a7p-boot.img"]
+optional = true
+page = "https://github.com/lbdl0030/dictpen-rootfs/releases/tag/A7pro-Y09P_RV1106"
+note = "已切好的整包镜像；版权归网易有道，仅供个人研究。切分偏移见 packs/a7p/README.md。"
+files = [
+  { url = "https://github.com/lbdl0030/dictpen-rootfs/releases/download/A7pro-Y09P_RV1106/a7p-rootfs.img", local = "a7p-rootfs.img", size = 1043034112, md5 = "970e5d9e985a7f49e8e82b35a8e21c37" },
+  { url = "https://github.com/lbdl0030/dictpen-rootfs/releases/download/A7pro-Y09P_RV1106/a7p-boot.img", local = "a7p-boot.img", size = 3647488, md5 = "50999a85646aaaa2bd808c71e50f3927" },
+]
+
+[[item]]
+id = "firmware-p5"
+what = "p5 的镜像：rootfs + boot（P5 / YDPP5-1 / Almond / RK3566 / OS 3.5.0）"
+check = "packs/p5/images/p5-rootfs.img"
+how = "http"
+into = "packs/p5/images"
+also = ["packs/p5/images/p5-boot.img"]
+optional = true
+page = "https://github.com/lbdl0030/dictpen-rootfs/releases/tag/P5-Almond"
+note = "已切好的整包镜像；版权归网易有道，仅供个人研究。切分偏移见 packs/p5/README.md。"
+files = [
+  { url = "https://github.com/lbdl0030/dictpen-rootfs/releases/download/P5-Almond/p5-rootfs.img", local = "p5-rootfs.img", size = 2097152000, md5 = "6e00f9996b9514ad7f6284d7b1f753a6" },
+  { url = "https://github.com/lbdl0030/dictpen-rootfs/releases/download/P5-Almond/p5-boot.img", local = "p5-boot.img", size = 12599296, md5 = "0e39cfa627604349ec991e91d2191325" },
+]
+
+[[item]]
+id = "firmware-x3s342"
+what = "x3s342 的镜像：merged rootfs + boot + uresource（YDPX3s / RK3566 / OS 3.4.2）"
+check = "packs/x3s342/images/x3s342-merged.img"
+how = "http"
+into = "packs/x3s342/images"
+also = ["packs/x3s342/images/x3s342-boot_a.img",
+        "packs/x3s342/images/x3s342-uresource.img"]
+optional = true
+page = "https://github.com/lbdl0030/dictpen-rootfs/releases/tag/X3s"
+note = "merged 已按 2.8.65 基线 + 3.4.2 增量合成、e2fsck 过；版权归网易有道，仅供个人研究。合并步骤见 packs/x3s342/README.md。"
+files = [
+  { url = "https://github.com/lbdl0030/dictpen-rootfs/releases/download/X3s/x3s342-merged.img", local = "x3s342-merged.img", size = 1610612736, md5 = "12bb1b885162bd4470d6ff4c90a77b3b" },
+  { url = "https://github.com/lbdl0030/dictpen-rootfs/releases/download/X3s/x3s342-boot_a.img", local = "x3s342-boot_a.img", size = 12563968, md5 = "a341047a41e3e52eff12a76ffc5cc8d3" },
+  { url = "https://github.com/lbdl0030/dictpen-rootfs/releases/download/X3s/x3s342-uresource.img", local = "x3s342-uresource.img", size = 774897664, md5 = "e5cc77e890d98ea904e9c8f19d9b00c3" },
+]
+
+[[item]]
+id = "firmware-x6pro"
+what = "x6pro 的镜像：system + boot（X6pro / RK3562 / ext4）"
+check = "packs/x6pro/images/system_a.img"
+how = "manual"
+also = ["packs/x6pro/images/boot_a.img"]
+optional = true
+where = "从 X6pro 的 OTA 包提取，步骤见 packs/x6pro/DEVLOG.md"
+note = "版权归网易有道，仅供个人研究。"
+
+[[item]]
+id = "firmware-x7"
+what = "x7 的镜像：system（X7 / RK3562 / erofs）"
+check = "packs/x7/images/x7-system_a.img"
+how = "manual"
+optional = true
+where = "上游该 release 只有说明文件；从 X7 的 OTA 包提取，步骤见 packs/x7/README.md"
+note = "版权归网易有道，仅供个人研究。"
 
 # ---------------------------------------------------------------- 构建产物
 [[item]]

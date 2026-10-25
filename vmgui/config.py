@@ -37,6 +37,7 @@ DEFAULTS: dict[str, Any] = {
         "aspect": "keep",              # keep | ignore
         "dpi_hint": 0,                 # 0 = 自动
         "frame_poll_ms": 30,
+        "idle_poll_ms": 150,           # 画面连续不变时的取帧间隔（静态页降负载）
         "zoom": 2.0,                   # mode="free" 时的缩放倍数
         "initial_zoom": 2.0,           # 初始窗口大小 = guest 尺寸 * 该值
         "background": "#101010",
@@ -83,6 +84,7 @@ SCHEMA: dict[str, dict[str, Any]] = {
     "display.aspect": {"type": str, "choices": ["keep", "ignore"], "label": "保持宽高比"},
     "display.dpi_hint": {"type": int, "min": 0, "label": "DPI 提示 (0=自动)"},
     "display.frame_poll_ms": {"type": int, "min": 5, "label": "拉帧间隔 (ms)"},
+    "display.idle_poll_ms": {"type": int, "min": 5, "label": "静止时拉帧间隔 (ms)"},
     "display.zoom": {"type": float, "min": 0.1, "label": "free 缩放倍数"},
     "display.initial_zoom": {"type": float, "min": 0.1, "label": "初始窗口倍数"},
     "display.background": {"type": str, "label": "背景色"},

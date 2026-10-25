@@ -12,12 +12,16 @@ README《分发与重建》讲清了为什么这么分。
 退出码：0 = 必需项都就位；1 = 还有必需项缺失（多为需要手工下载的固件）。
 """
 import argparse
+import concurrent.futures
 import hashlib
 import os
 import shutil
 import subprocess
 import sys
 import tarfile
+import threading
+import time
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -72,6 +76,161 @@ def unzip_into(zip_path, into):
     with zipfile.ZipFile(zip_path) as z:
         z.extractall(into)
     print(f"    展开到 {rel(into)}")
+
+
+def download_resumable(url, dest, expected_size=0):
+    """下大文件：支持断点续传（.part），完成后再改名。
+
+    镜像站/Release 动辄 1~2 GB，一次断线就重下不现实；服务端不认 Range 时自动退回整下。
+    """
+    part = dest + ".part"
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    start = os.path.getsize(part) if os.path.exists(part) else 0
+    if expected_size and start > expected_size:      # 半截文件比目标还大：作废重下
+        os.remove(part)
+        start = 0
+    headers = {"User-Agent": "dictpen-vm/1.0"}
+    if start:
+        headers["Range"] = f"bytes={start}-"
+    print(f"    GET {url}" + (f"（续传 {human(start)}）" if start else ""))
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=600) as r:
+            mode = "ab"
+            if start and getattr(r, "status", 200) != 206:
+                start, mode = 0, "wb"
+            total = expected_size or (int(r.headers.get("Content-Length") or 0) + start)
+            done = start
+            nxt = done + (256 << 20)
+            with open(part, mode) as f:
+                while True:
+                    block = r.read(1 << 20)
+                    if not block:
+                        break
+                    f.write(block)
+                    done += len(block)
+                    if done >= nxt:
+                        pct = f"，{done * 100 // total}%" if total else ""
+                        print(f"      {human(done)}{pct}")
+                        nxt = done + (256 << 20)
+    except urllib.error.HTTPError as e:
+        if e.code == 416 and start and expected_size and start == expected_size:
+            pass                              # 已经下完，只是还没改名
+        else:
+            raise
+    size = os.path.getsize(part)
+    if expected_size and size != expected_size:
+        raise RuntimeError(f"下载大小不符：{rel(part)} 期望 {expected_size}，实际 {size}")
+    os.replace(part, dest)
+    print(f"    -> {rel(dest)} ({human(size)})")
+
+
+MAX_DL_THREADS = 32
+PARALLEL_MIN_BYTES = 16 << 20      # 小于这个走单线，省得为 3 MB 的 boot 开 16 个连接
+CHUNK_MIN = 4 << 20
+CHUNK_MAX = 32 << 20
+
+
+class NoRange(Exception):
+    """服务端不认 Range（分片请求回了 200 整包）：改单线下载。"""
+
+
+def dl_threads(item):
+    raw = os.environ.get("DICTPEN_DL_THREADS") or item.get("connections") or MAX_DL_THREADS
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        n = MAX_DL_THREADS
+    return max(1, min(MAX_DL_THREADS, n))
+
+
+def _chunk_dir(dest):
+    return dest + ".chunks"
+
+
+def _clean_chunks(dest):
+    shutil.rmtree(_chunk_dir(dest), ignore_errors=True)
+    part = dest + ".part"
+    if os.path.exists(part):
+        os.remove(part)
+
+
+def _fetch_chunk(url, start, end, path, attempts=3):
+    want = end - start + 1
+    if os.path.exists(path) and os.path.getsize(path) == want:
+        return want
+    last = None
+    for i in range(attempts):
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "dictpen-vm/1.0",
+                "Range": f"bytes={start}-{end}"})
+            with urllib.request.urlopen(req, timeout=300) as r:
+                if getattr(r, "status", 200) != 206:
+                    raise NoRange()
+                cr = r.headers.get("Content-Range", "")
+                if not cr.startswith(f"bytes {start}-"):
+                    raise RuntimeError(f"Content-Range 不符：{cr!r}")
+                cl = int(r.headers.get("Content-Length") or 0)
+                if cl and cl < want:
+                    raise RuntimeError("分片长度不足")
+                tmp = path + ".tmp"
+                with open(tmp, "wb") as f:
+                    left = want
+                    while left:
+                        block = r.read(min(1 << 20, left))
+                        if not block:
+                            raise RuntimeError("分片提前结束")
+                        f.write(block)
+                        left -= len(block)
+                os.replace(tmp, path)
+            return want
+        except NoRange:
+            raise
+        except Exception as e:                     # noqa: BLE001 网络错误统一重试
+            last = e
+            time.sleep(0.5 * (i + 1))
+    raise RuntimeError(f"分片 {start}-{end} 下载失败：{last}")
+
+
+def download_parallel(url, dest, size, threads):
+    """按 Range 分片并行下载；失败时保留 .chunks，重跑会跳过已完成分片。"""
+    threads = max(1, min(MAX_DL_THREADS, threads))
+    chunk = max(CHUNK_MIN, min(CHUNK_MAX, size // max(1, threads * 4)))
+    ranges = [(s, min(s + chunk - 1, size - 1)) for s in range(0, size, chunk)]
+    threads = min(threads, len(ranges))
+    cdir = _chunk_dir(dest)
+    os.makedirs(cdir, exist_ok=True)
+    print(f"    并行下载：{threads} 线，{len(ranges)} 个分片（{human(size)}）")
+    done = 0
+    lock = threading.Lock()
+    nxt = [256 << 20]
+
+    def work(i, start, end):
+        nonlocal done
+        n = _fetch_chunk(url, start, end, os.path.join(cdir, f"{i:05d}"))
+        with lock:
+            done += n
+            if done >= nxt[0]:
+                print(f"      {human(done)}，{done * 100 // size}%")
+                nxt[0] = done + (256 << 20)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as ex:
+        futs = [ex.submit(work, i, s, e) for i, (s, e) in enumerate(ranges)]
+        for f in concurrent.futures.as_completed(futs):
+            f.result()
+
+    part = dest + ".part"
+    print(f"    组装 {len(ranges)} 个分片 …")
+    with open(part, "wb") as fo:
+        for i in range(len(ranges)):
+            p = os.path.join(cdir, f"{i:05d}")
+            with open(p, "rb") as fi:
+                shutil.copyfileobj(fi, fo, 1 << 20)
+            os.remove(p)
+    os.rmdir(cdir)
+    os.replace(part, dest)
+    print(f"    -> {rel(dest)} ({human(size)})")
 
 
 def run(cmd, **kw):
@@ -190,6 +349,36 @@ def how_firmware(item):
                 f"      MD5 {f['md5']}" for f in missing))
 
 
+def how_http(item):
+    """直接从 URL 下已切好的镜像（支持断点续传），下完核对 MD5。"""
+    into = item.get("into", "downloads")
+    for f in item["files"]:
+        dest = under(os.path.join(into, f["local"]))
+        want_size = int(f.get("size") or 0)
+        if (os.path.exists(dest) and (not want_size or os.path.getsize(dest) == want_size)
+                and md5_of(dest) == f["md5"]):
+            print(f"    {rel(dest)} 已就位（MD5 已核对）")
+            continue
+        if os.path.exists(dest):
+            os.remove(dest)                   # 大小或 MD5 不对：整份重下
+        threads = dl_threads(item)
+        if want_size >= PARALLEL_MIN_BYTES and threads > 1:
+            try:
+                download_parallel(f["url"], dest, want_size, threads)
+            except NoRange:
+                print("    服务端不支持 Range，改单线下载")
+                _clean_chunks(dest)
+                download_resumable(f["url"], dest, want_size)
+        else:
+            download_resumable(f["url"], dest, want_size)
+        got = md5_of(dest)
+        if got != f["md5"]:
+            _clean_chunks(dest)
+            os.remove(dest)
+            raise RuntimeError(f"MD5 不符：{rel(dest)} 期望 {f['md5']}，实际 {got}")
+        print(f"    MD5 已核对：{f['md5']}")
+
+
 def how_manual(item):
     raise Manual(item.get("where", "") + ("  " + item.get("note", "")
                                          if item.get("note") else ""))
@@ -197,7 +386,8 @@ def how_manual(item):
 
 HANDLERS = {"file": how_file, "msys2": how_msys2, "deb": how_deb,
             "deb-arm64": how_deb_arm64, "ssh-key": how_ssh_key, "cert": how_cert,
-            "initramfs": how_initramfs, "firmware": how_firmware, "manual": how_manual}
+            "initramfs": how_initramfs, "firmware": how_firmware,
+            "http": how_http, "manual": how_manual}
 
 
 class Manual(Exception):
@@ -212,6 +402,14 @@ def inspect(item):
         check = under(p)
         if not os.path.exists(check):
             return MISS, f"缺 {rel(check)}"
+    if item.get("how") == "http":             # 大文件不每次算 MD5，先看大小
+        into = item.get("into", "downloads")
+        for f in item.get("files", []):
+            p = under(os.path.join(into, f["local"]))
+            want_size = int(f.get("size") or 0)
+            if os.path.exists(p) and want_size and os.path.getsize(p) != want_size:
+                return MISS, (f"{rel(p)} 大小不符（期望 {want_size}，"
+                              f"实际 {os.path.getsize(p)}）")
     want = item.get("md5")
     if want and os.path.isfile(under(item["check"])):
         got = md5_of(under(item["check"]))
@@ -236,6 +434,15 @@ def hint(item):
     if how == "manual":
         return f"      {item.get('where', '')}" + (
             f"\n      {item['note']}" if item.get("note") else "")
+    if how == "http":
+        into = item.get("into", "downloads")
+        todo = [f for f in item["files"]
+                if not os.path.exists(under(os.path.join(into, f["local"])))]
+        if not todo:
+            return None
+        return ("      直接下载（去掉 --check 就会执行，支持断点续传）：\n"
+                + "\n".join(f"      {f['url']}\n"
+                            f"        -> {into}/{f['local']}  MD5 {f['md5']}" for f in todo))
     if how == "deb":
         names = ", ".join(os.path.basename(p) for p in item["debs"])
         return f"      下载 {names} 放到 downloads/ 后重跑\n      {item.get('where', '')}"

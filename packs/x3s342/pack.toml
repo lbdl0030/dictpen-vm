@@ -51,8 +51,9 @@ license = true                      # 开发凭证
 ap = true                           # 虚拟 AP（wlan1 广播 Youdao-VM），应用联网页要用
 # 合成器载荷与 UI 入口：prepare.sh 把 S55vm-ui 装进 /etc/init.d，
 # 两份 weston 载荷落到 /userdata，再由 S55vm-ui 在开机时解开。
+# 载荷与 p5 完全相同，放 packs/_shared/ 单份（else 发布包里白多 70 MB）。
 hooks = ["patches/prepare.sh"]
-extra = ["weston.tar", "patches/weston9.tar", "patches/S55vm-ui",
+extra = ["../_shared/weston.tar", "../_shared/weston9.tar", "patches/S55vm-ui",
          "patches/S45vm-wifi", "patches/touchbridge.bin",
          "patches/libvmsn.so", "patches/install-presets.sh",
          "patches/asound.conf.vm", "patches/fakekeys.bin",
